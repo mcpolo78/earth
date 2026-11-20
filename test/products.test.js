@@ -25,6 +25,11 @@ describe("products", () => {
         const g = grid([0, null, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 4, 3);
         expect(g.interpolate(45, 90)).toBeNull();
     });
+    it("treats NaN from binary layers as missing data", () => {
+        const g = grid(Float32Array.from([0, NaN, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]), 4, 3);
+        expect(g.interpolate(45, 90)).toBeNull();
+        expect(g.interpolate(180, 0)).toBe(6);
+    });
     it("lookupOscar finds the closest earlier file", () => {
         const catalog = ["20140101-a.json", "20140106-a.json", "20140112-a.json"];
         expect(lookupOscar(catalog, "current")).toBe("20140112-a.json");
@@ -34,8 +39,8 @@ describe("products", () => {
     it("builds wind + overlay products with the expected data paths", () => {
         const [wind, temp] = productsFor({date: "2026/11/20", hour: "2100", param: "wind", surface: "isobaric",
             level: "850hPa", overlayType: "temp"});
-        expect(wind.paths).toEqual(["/data/weather/2026/11/20/2100-wind-isobaric-850hPa-gfs-1.0.json"]);
-        expect(temp.paths).toEqual(["/data/weather/2026/11/20/2100-temp-isobaric-850hPa-gfs-1.0.json"]);
+        expect(wind.paths).toEqual(["/data/weather/2026/11/20/2100-wind-isobaric-850hPa-gfs-1.0.bin"]);
+        expect(temp.paths).toEqual(["/data/weather/2026/11/20/2100-temp-isobaric-850hPa-gfs-1.0.bin"]);
         expect(overlayTypes.has("mean_sea_level_pressure")).toBe(true);
     });
 });

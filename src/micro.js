@@ -283,6 +283,51 @@ export async function loadJson(resource) {
 }
 
 /**
+ * Parses the compact binary layer format written by scripts/fetch_gfs.py:
+ *
+ *     "EGB1" | uint32 LE n | n bytes of UTF-8 JSON (array of record headers) | padding to 4 bytes |
+ *     for each record: nx * ny float32 LE values (NaN where there is no data)
+ *
+ * @returns {Array} records in the same shape as the JSON format: [{header, data: Float32Array}, ...]
+ */
+export function parseBinaryLayer(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+    if (magic !== "EGB1") {
+        throw new Error("not an EGB1 layer");
+    }
+    const headerLength = new DataView(buffer).getUint32(4, true);
+    const headers = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + headerLength)));
+    let offset = 8 + headerLength;
+    offset += (4 - offset % 4) % 4;
+    return headers.map(header => {
+        const size = header.nx * header.ny;
+        const data = new Float32Array(buffer, offset, size);
+        offset += size * 4;
+        return {header, data};
+    });
+}
+
+/**
+ * Returns a promise for a weather layer: binary (.bin) or JSON. Rejects like loadJson.
+ */
+export async function loadData(resource) {
+    if (!resource.endsWith(".bin")) {
+        return loadJson(resource);
+    }
+    let response;
+    try {
+        response = await fetch(resource);
+    } catch (e) {
+        throw {status: -1, message: "Cannot load resource: " + resource, resource};
+    }
+    if (!response.ok) {
+        throw {status: response.status, message: response.statusText, resource};
+    }
+    return parseBinaryLayer(await response.arrayBuffer());
+}
+
+/**
  * Returns the distortion introduced by the specified projection at the given point.
  *
  * This method uses finite difference estimates to calculate warping by adding a very small amount (h) to
