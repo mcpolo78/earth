@@ -789,9 +789,19 @@ function init() {
     rendererAgent.listenTo(meshAgent, "update", startRendering);
     rendererAgent.listenTo(globeAgent, "update", startRendering);
 
-    // Particle animation: (re)start whenever the data or the globe changes. It keeps running during moves.
-    gridAgent.on("submit", () => stopAnimation(false));
-    gridAgent.on("update", startAnimation);
+    // Particle animation: (re)start whenever the data or the globe changes. It keeps running during moves, and
+    // when only the time changes the particles carry on with the new grid, so playing the forecast is smooth.
+    gridAgent.on("update", function(grids) {
+        const sameKind = animator && animator.globe === globeAgent.value() &&
+            animator.grids.primaryGrid.type === grids.primaryGrid.type;
+        if (sameKind) {
+            animator.setGrid(grids.primaryGrid);
+            animator.grids = grids;
+        }
+        else {
+            startAnimation();
+        }
+    });
     globeAgent.on("update", startAnimation);
     rendererAgent.on("start", () => animator && animator.setMoving(true));
     rendererAgent.on("render", function() {
@@ -934,6 +944,93 @@ function init() {
     d3.select(window).on("resize", onResize).on("orientationchange", onResize);
 }
 
+/**
+ * The time slider lists the forecast steps found in /data/weather/catalog.json (written by fetch_gfs.py). Moving
+ * it, or pressing play, navigates the configuration to that time. While playing, the next step is requested a
+ * moment after the previous one has been displayed.
+ */
+function buildTimeline() {
+    const row = d3.select("#time-row"), slider = d3.select("#time-slider");
+    const label = d3.select("#time-label"), play = d3.select("#time-play");
+    const PLAY_DELAY = 700;  // ms to show each step while playing
+    let times = [], playing = false, timer = null;
+
+    const format = date => date.toLocaleString(undefined, {weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+
+    function nearestIndex(time) {
+        let best = 0;
+        times.forEach((t, i) => {
+            if (Math.abs(t - time) < Math.abs(times[best] - time)) best = i;
+        });
+        return best;
+    }
+
+    function sync() {
+        if (times.length === 0) return;
+        const time = validityDate(gridAgent.value());
+        if (time === null) return;
+        const i = nearestIndex(time);
+        slider.property("value", i);
+        label.text(format(times[i]));
+    }
+
+    function goTo(i) {
+        configuration.save(µ.dateToConfig(times[i]));
+    }
+
+    const goToDebounced = µ.debounce(goTo, 150);
+
+    function stop() {
+        playing = false;
+        clearTimeout(timer);
+        play.text("▶").classed("highlighted", false);
+    }
+
+    function advance() {
+        if (!playing) return;
+        const next = (+slider.property("value") + 1) % times.length;
+        slider.property("value", next);
+        label.text(format(times[next]));
+        goTo(next);
+    }
+
+    slider.on("input", function() {
+        stop();
+        const i = +this.value;
+        label.text(format(times[i]));
+        goToDebounced(i);
+    });
+    play.on("click", function() {
+        if (playing) {
+            stop();
+        }
+        else if (times.length > 1) {
+            playing = true;
+            play.text("❚❚").classed("highlighted", true);
+            advance();
+        }
+    });
+    gridAgent.on("update", function() {
+        sync();
+        if (playing) {
+            clearTimeout(timer);
+            timer = setTimeout(advance, PLAY_DELAY);
+        }
+    });
+    gridAgent.on("reject", () => playing && (timer = setTimeout(advance, PLAY_DELAY)));  // skip missing steps
+    configuration.on("change:param", (model, param) => {
+        row.classed("invisible", param !== "wind");
+        if (param !== "wind") stop();
+    });
+
+    µ.loadJson("/data/weather/catalog.json").then(catalog => {
+        times = catalog.times.map(t => new Date(t));
+        slider.attr("max", Math.max(times.length - 1, 0));
+        row.classed("invisible", times.length < 2 || configuration.get("param") !== "wind");
+        sync();
+    }).catch(() => row.classed("invisible", true));
+}
+
 function start() {
     // Everything is now set up, so load configuration from the hash fragment and kick off change events.
     configuration.fetch();
@@ -941,6 +1038,7 @@ function start() {
 
 try {
     init();
+    buildTimeline();
     start();
 } catch (e) {
     report.error(e);

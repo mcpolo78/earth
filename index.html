@@ -56,6 +56,11 @@
             <p>Data | <span id="data-layer"></span></p>
             <p><span id="scale-label">Scale | </span><canvas id="scale"></canvas></p>
             <p>Source | <span id="data-center"></span></p>
+            <p id="time-row">Time | <span
+                class="text-button" id="time-play" title="Play forecast">▶</span><input
+                type="range" id="time-slider" min="0" max="0" value="0" step="1" aria-label="Forecast time"/><span
+                id="time-label"></span>
+            </p>
             <p>Control | <span
                 class="text-button" id="nav-now" title="Current Conditions">Now</span><span
                 class="text-button" id="nav-backward-more"> « </span> – <span
@@ -91,6 +96,12 @@
                 class="text-button" id="overlay-total_precipitable_water" title="Total Precipitable Water">TPW</span> – <span
                 class="text-button" id="overlay-total_cloud_water" title="Total Cloud Water">TCW</span> – <span
                 class="text-button" id="overlay-mean_sea_level_pressure" title="Mean Sea Level Pressure">MSLP</span>
+            </p>
+            <p class="wind-mode"><span style="visibility:hidden">Overlay</span> | <span
+                class="text-button" id="overlay-precipitation_rate" title="Precipitation Rate">Rain</span> – <span
+                class="text-button" id="overlay-snow_depth" title="Snow Depth">Snow</span> – <span
+                class="text-button" id="overlay-cape" title="CAPE (thunderstorm potential)">CAPE</span> – <span
+                class="text-button" id="overlay-total_cloud_cover" title="Total Cloud Cover">Clouds</span>
             </p>
             <p class="ocean-mode invisible">Animate | <span
                 class="text-button" id="animate-currents" title="Currents">Currents</span>

@@ -9,8 +9,8 @@ so a full run is a few MB instead of the ~40 MB of the whole file.
 Requirements:  pip install -r scripts/requirements.txt   (eccodes, numpy)
 
 Usage:
-    python scripts/fetch_gfs.py                      # latest available run, analysis only, also written as "current"
-    python scripts/fetch_gfs.py --hours 0-24:3       # latest run, forecasts every 3 hours up to +24h
+    python scripts/fetch_gfs.py                      # latest run, analysis + forecasts every 3 hours up to +24h
+    python scripts/fetch_gfs.py --hours 0            # latest run, analysis only
     python scripts/fetch_gfs.py --run 2026112006     # a specific run (yyyymmddhh)
 
 Output (under public/data/weather):
@@ -48,6 +48,10 @@ def layer_specs():
         ("total_cloud_water", None, None, ["CWAT:entire atmosphere (considered as a single layer)"]),
         ("total_precipitable_water", None, None, ["PWAT:entire atmosphere (considered as a single layer)"]),
         ("mean_sea_level_pressure", None, None, ["PRMSL:mean sea level"]),
+        ("precipitation_rate", None, None, ["PRATE:surface"]),
+        ("snow_depth", None, None, ["SNOD:surface"]),
+        ("cape", None, None, ["CAPE:surface"]),
+        ("total_cloud_cover", None, None, ["TCDC:entire atmosphere"]),
     ]
     for hpa in LEVELS:
         lvl = f"{hpa} mb"
@@ -159,7 +163,8 @@ def encode_layer(records):
 
 
 def precision_for(layer_type):
-    return {"total_cloud_water": 4, "air_density": 4, "mean_sea_level_pressure": 0}.get(layer_type, 2)
+    return {"total_cloud_water": 4, "air_density": 4, "mean_sea_level_pressure": 0,
+            "precipitation_rate": 7, "snow_depth": 3, "cape": 0, "total_cloud_cover": 0}.get(layer_type, 2)
 
 
 def file_name(stamp, layer_type, surface, level):
@@ -208,6 +213,27 @@ def write_layers(layers, valid_time):
     return written
 
 
+def write_catalog():
+    """
+    Lists the validity times that have data (a surface wind layer) in public/data/weather/catalog.json, so the
+    app's time slider knows which steps exist: {"times": ["2026-11-20T18:00:00Z", ...]}.
+    """
+    times = []
+    for path in sorted(OUT.glob("[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]/*-wind-surface-level-gfs-1.0.bin")):
+        year, month, day = path.parts[-4:-1]
+        times.append(f"{year}-{month}-{day}T{path.name[:2]}:00:00Z")
+    (OUT / "catalog.json").write_text(json.dumps({"times": times}, indent=1))
+    return times
+
+
+def prune(keep_days):
+    """Deletes dated layer directories older than keep_days."""
+    limit = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=keep_days)).strftime("%Y/%m/%d")
+    for day in OUT.glob("[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]"):
+        if "/".join(day.parts[-3:]) < limit:
+            shutil.rmtree(day)
+
+
 def parse_hours(spec):
     """Parses "0", "0,3,6" or "0-24:3" into a sorted list of forecast hours."""
     hours = set()
@@ -224,7 +250,9 @@ def parse_hours(spec):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--run", help="GFS run as yyyymmddhh (default: latest available)")
-    parser.add_argument("--hours", default="0", help='forecast hours, e.g. "0", "0,6,12" or "0-24:3" (default: 0)')
+    parser.add_argument("--hours", default="0-24:3",
+                        help='forecast hours, e.g. "0", "0,6,12" or "0-48:3" (default: 0-24:3)')
+    parser.add_argument("--keep-days", type=int, default=3, help="delete data older than this many days (default: 3)")
     parser.add_argument("--no-current", action="store_true", help='do not update the "current" layers')
     args = parser.parse_args()
 
@@ -250,6 +278,10 @@ def main():
             name = "current-" + path.name.split("-", 1)[1]
             shutil.copyfile(path, current / name)
         print(f'  "current" now points at {closest[0]:%Y-%m-%d %H}Z')
+
+    prune(args.keep_days)
+    times = write_catalog()
+    print(f"  catalog: {len(times)} time steps available")
 
 
 if __name__ == "__main__":
