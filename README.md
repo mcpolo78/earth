@@ -1,39 +1,50 @@
-earth
-=====
+earth (fork modernisé)
+======================
 
-**NOTE: the location of `dev-server.js` has changed from `{repository}/server/` to `{repository}/`**
+Fork privé de [cambecc/earth](https://github.com/cambecc/earth), la carte animée des vents et de la météo
+mondiale, remis à niveau : Vite, modules ES, D3 v7, et un nouveau script de récupération des données GFS.
 
-"earth" is a project to visualize global weather conditions.
+Démarrer
+--------
 
-A customized instance of "earth" is available at http://earth.nullschool.net.
+Prérequis : Node.js 20 ou plus, Python 3.10 ou plus.
 
-"earth" is a personal project I've used to learn javascript and browser programming, and is based on the earlier
-[Tokyo Wind Map](https://github.com/cambecc/air) project.  Feedback and contributions are welcome! ...especially
-those that clarify accepted best practices.
-
-building and launching
-----------------------
-
-After installing node.js and npm, clone "earth" and install dependencies:
-
-    git clone https://github.com/cambecc/earth
-    cd earth
     npm install
+    python -m pip install -r scripts/requirements.txt
+    npm run data          # télécharge les dernières données GFS (environ 20 secondes)
+    npm run dev           # puis ouvrir http://localhost:8080
 
-Next, launch the development web server:
+Autres commandes :
 
-    node dev-server.js 8080
+    npm run data -- --hours 0-24:3     # prévisions toutes les 3 h sur 24 h (navigation ‹ › dans le menu)
+    npm run data -- --run 2026112006   # un run précis (aaaammjjhh)
+    npm test                           # tests unitaires (Vitest)
+    npm run build && npm run preview   # version de production dans dist/
 
-Finally, point your browser to:
+Sous Windows, si `python` n'est pas trouvé, remplacer par `py` (par exemple `py scripts/fetch_gfs.py`).
 
-    http://localhost:8080
+Données météo
+-------------
 
-The server acts as a stand-in for static S3 bucket hosting and so contains almost no server-side logic. It
-serves all files located in the `earth/public` directory. See `public/index.html` and `public/libs/earth/*.js`
-for the main entry points. Data files are located in the `public/data` directory, and there is one sample
-weather layer located at `data/weather/current`.
+`scripts/fetch_gfs.py` lit le [GFS](https://www.ncei.noaa.gov/products/weather-climate-models/global-forecast)
+de la NOAA sur le bucket public AWS `noaa-gfs-bdp-pds`. Il ne télécharge que les messages GRIB2 utiles grâce
+aux fichiers `.idx` (requêtes HTTP partielles), les décode avec [ecCodes](https://github.com/ecmwf/eccodes),
+puis écrit le même format JSON qu'utilisait l'ancien outil Java `grib2json`. La densité de l'air est calculée
+à partir de la température (loi des gaz parfaits). Les fichiers produits vont dans `public/data/weather/`,
+qui n'est pas versionné.
 
-*For Ubuntu, Mint, and elementary OS, use `nodejs` instead of `node` instead due to a [naming conflict](https://github.com/joyent/node/wiki/Installing-Node.js-via-package-manager#ubuntu-mint-elementary-os).
+Ce qui a changé par rapport à l'original
+----------------------------------------
+
+* Vite remplace le serveur Express et Grunt ; plus de dépendance chargée depuis un CDN.
+* Code en modules ES (`src/`), D3 v3 → D3 v7 (+ d3-geo-projection, d3-geo-polygon), topojson-client.
+* underscore, backbone et when.js supprimés : un petit `Emitter` (`src/events.js`) et les Promises natives.
+* Le globe se redimensionne avec la fenêtre.
+* Tests QUnit remplacés par Vitest (`test/`).
+
+---
+
+*Le texte ci-dessous vient du README d'origine.*
 
 getting map data
 ----------------
@@ -58,22 +69,6 @@ following commands build these files:
     topojson -o earth-topo.json coastline_50m.json coastline_110m.json lakes_50m.json lakes_110m.json
     topojson -o earth-topo-mobile.json coastline_110m.json coastline_tiny.json lakes_110m.json lakes_tiny.json
     cp earth-topo*.json <earth-git-repository>/public/data/
-
-getting weather data
---------------------
-
-Weather data is produced by the [Global Forecast System](http://en.wikipedia.org/wiki/Global_Forecast_System) (GFS),
-operated by the US National Weather Service. Forecasts are produced four times daily and made available for
-download from [NOMADS](http://nomads.ncep.noaa.gov/). The files are in [GRIB2](http://en.wikipedia.org/wiki/GRIB)
-format and contain over [300 records](http://www.nco.ncep.noaa.gov/pmb/products/gfs/gfs.t00z.pgrbf00.grib2.shtml).
-We need only a few of these records to visualize wind data at a particular isobar. The following commands download
-the 1000 hPa wind vectors and convert them to JSON format using the [grib2json](https://github.com/cambecc/grib2json)
-utility:
-
-    YYYYMMDD=<a date, for example: 20140101>
-    curl "http://nomads.ncep.noaa.gov/cgi-bin/filter_gfs.pl?file=gfs.t00z.pgrb2.1p00.f000&lev_10_m_above_ground=on&var_UGRD=on&var_VGRD=on&dir=%2Fgfs.${YYYYMMDD}00" -o gfs.t00z.pgrb2.1p00.f000
-    grib2json -d -n -o current-wind-surface-level-gfs-1.0.json gfs.t00z.pgrb2.1p00.f000
-    cp current-wind-surface-level-gfs-1.0.json <earth-git-repository>/public/data/weather/current
 
 font subsetting
 ---------------
