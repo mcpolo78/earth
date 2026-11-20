@@ -65,4 +65,18 @@ describe("products", () => {
         expect(g.interpolate(45, 90)).toBeNull();  // touches the NaN (land) point
         expect(g.interpolate(180, 0)).toEqual([3, 4, 5]);  // magnitude is the significant height
     });
+    it("builds the GEFS-Aerosols air quality overlays", () => {
+        for (const type of ["pm2_5", "pm10", "aerosol_optical_depth", "dust_optical_depth"]) {
+            const [wind, product] = productsFor({date: "2026/11/21", hour: "0600", param: "wind", surface: "isobaric",
+                level: "500hPa", overlayType: type});
+            expect(wind.type).toBe("wind");
+            expect(product.paths).toEqual([`/data/weather/2026/11/21/0600-${type}-gfs-0.5.bin`]);
+            expect(product.scale.gradient(product.scale.bounds[1] * 2, 255)).toHaveLength(4);
+        }
+        const header = {nx: 4, ny: 3, lo1: 0, la1: 90, dx: 90, dy: 90, refTime: "2026-11-21T00:00:00Z",
+            forecastTime: 6, center: null, centerName: "GEFS-Aerosols / NCEP / US National Weather Service"};
+        const [, pm] = productsFor({date: "current", hour: "", param: "wind", surface: "surface", level: "level", overlayType: "pm2_5"});
+        const g = buildGrid(pm.builder([{header, data: Float32Array.from({length: 12}, (_, i) => i)}]));
+        expect(g.source).toBe("GEFS-Aerosols / NCEP / US National Weather Service");
+    });
 });

@@ -52,6 +52,42 @@ function gfsWave0p5degPath(attr, type) {
     return gfsPath(attr, type, "surface", "level", "0.5");
 }
 
+/** GEFS-Aerosols layers, thinned to 0.5° by scripts/fetch_gfs.py. */
+function gefsAerosol0p5degPath(attr, type) {
+    return gfsPath(attr, type, null, null, "0.5");
+}
+
+/** An air quality overlay from GEFS-Aerosols: a scalar layer with the given scale. */
+function aerosolFactory(type, name, units, scale) {
+    return {
+        matches: matches({param: "wind", overlayType: type}),
+        create(attr) {
+            return buildProduct({
+                field: "scalar",
+                type,
+                description: localize({name, qualifier: ""}),
+                paths: [gefsAerosol0p5degPath(attr, type)],
+                date: gfsDate(attr),
+                builder: scalarBuilder(),
+                units,
+                scale
+            });
+        }
+    };
+}
+
+// Colors follow the usual air quality index bands: good, moderate, unhealthy for sensitive groups, unhealthy,
+// very unhealthy, hazardous.
+const PM_UNITS = [{label: "µg/m³", conversion: x => x, precision: 0}];
+const AQI_COLORS = [[40, 80, 140], [50, 170, 120], [230, 220, 60], [245, 140, 40], [220, 40, 50], [140, 40, 150], [110, 20, 40]];
+
+function aqiScale(thresholds) {
+    return {
+        bounds: [0, thresholds[thresholds.length - 1]],
+        gradient: µ.segmentedColorScale(thresholds.map((t, i) => [t, AQI_COLORS[i]]))
+    };
+}
+
 function gfsDate(attr) {
     if (attr.date === "current") {
         // Construct the date from the current time, rounding down to the nearest three-hour block.
@@ -532,6 +568,32 @@ const FACTORIES = {
             });
         }
     },
+
+    // Air quality (GEFS-Aerosols). Surface fields, so they ignore the selected height.
+    "pm2_5": aerosolFactory("pm2_5",
+        {en: "PM2.5", ja: "PM2.5", fr: "PM2,5"}, PM_UNITS, aqiScale([0, 10, 25, 50, 75, 150, 250])),
+    "pm10": aerosolFactory("pm10",
+        {en: "PM10", ja: "PM10", fr: "PM10"}, PM_UNITS, aqiScale([0, 20, 50, 100, 150, 250, 400])),
+    "aerosol_optical_depth": aerosolFactory("aerosol_optical_depth",
+        {en: "Aerosol Optical Depth (550 nm)", ja: "エアロゾル光学的厚さ", fr: "Épaisseur optique des aérosols"},
+        [{label: "", conversion: x => x, precision: 2}],
+        {
+            bounds: [0, 2],
+            gradient: µ.segmentedColorScale([
+                [0, [25, 30, 60]], [0.1, [40, 90, 150]], [0.3, [90, 170, 140]], [0.6, [230, 210, 90]],
+                [1, [235, 130, 50]], [2, [180, 40, 60]]
+            ])
+        }),
+    "dust_optical_depth": aerosolFactory("dust_optical_depth",
+        {en: "Dust Optical Depth (550 nm)", ja: "黄砂・砂塵の光学的厚さ", fr: "Épaisseur optique des poussières"},
+        [{label: "", conversion: x => x, precision: 2}],
+        {
+            bounds: [0, 1.5],
+            gradient: µ.segmentedColorScale([
+                [0, [30, 30, 40]], [0.02, [80, 65, 45]], [0.1, [170, 125, 60]], [0.4, [225, 175, 85]],
+                [1, [245, 215, 140]], [1.5, [255, 245, 220]]
+            ])
+        }),
 
     "currents": {
         matches: matches({param: "ocean", surface: "surface", level: "currents"}),

@@ -39,6 +39,10 @@ direction et période du pic. En mode Ocean, les particules suivent la direction
 plus vite quand elles sont plus hautes. `--no-waves` désactive ce téléchargement. Les courants (OSCAR) restent
 l'échantillon de 2014 fourni avec le projet d'origine.
 
+La qualité de l'air vient de GEFS-Aerosols (NOAA, bucket public `noaa-gefs-pds`, sans clé d'API, contrairement à
+CAMS) : PM2,5 et PM10 au sol, épaisseur optique des aérosols et des poussières à 550 nm. Grille ramenée à 0,5°,
+mêmes échéances que le GFS. `--no-aerosols` désactive ce téléchargement.
+
 Ce qui a changé par rapport à l'original
 ----------------------------------------
 
