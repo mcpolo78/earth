@@ -34,6 +34,11 @@ float32), 30 à 40 % plus léger que le JSON et sans analyse de texte côté nav
 à partir de la température (loi des gaz parfaits). Les fichiers produits vont dans `public/data/weather/`,
 qui n'est pas versionné.
 
+La houle vient de GFS-Wave (WAVEWATCH III, même bucket, grille 0,25° ramenée à 0,5°) : hauteur significative,
+direction et période du pic. En mode Ocean, les particules suivent la direction des vagues dominantes et vont
+plus vite quand elles sont plus hautes. `--no-waves` désactive ce téléchargement. Les courants (OSCAR) restent
+l'échantillon de 2014 fourni avec le projet d'origine.
+
 Ce qui a changé par rapport à l'original
 ----------------------------------------
 

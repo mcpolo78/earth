@@ -797,6 +797,7 @@ function init() {
         if (sameKind) {
             animator.setGrid(grids.primaryGrid);
             animator.grids = grids;
+            report.status("");
         }
         else {
             startAnimation();
@@ -839,10 +840,15 @@ function init() {
     d3.select("#location-close").on("click", () => clearLocationDetails(true));
 
     // Modify menu depending on what mode we're in.
-    configuration.on("change:param", function(model, mode) {
-        d3.selectAll(".ocean-mode").classed("invisible", mode !== "ocean");
+    // Rows tagged with data-level (e.g. the wave overlays) only show for that ocean animation.
+    configuration.on("change", function(model) {
+        if (!changedKeys().some(k => k === "param" || k === "level")) return;
+        const mode = model.get("param"), level = model.get("level");
+        d3.selectAll(".ocean-mode").classed("invisible", function() {
+            return mode !== "ocean" || (this.dataset.level !== undefined && this.dataset.level !== level);
+        });
         d3.selectAll(".wind-mode").classed("invisible", mode !== "wind");
-        switch (mode) {
+        switch (mode === "ocean" && level === "waves" ? "wind" : mode) {  // waves follow the 3-hourly GFS steps
             case "wind":
                 d3.select("#nav-backward-more").attr("title", "-1 Day");
                 d3.select("#nav-backward").attr("title", "-3 Hours");
@@ -871,7 +877,7 @@ function init() {
         if (configuration.get("param") !== "ocean") {
             // When switching between modes, there may be no associated data for the current date. So we need
             // find the closest available according to the catalog. This is not necessary if date is "current".
-            const ocean = {param: "ocean", surface: "surface", level: "currents", overlayType: "default"};
+            const ocean = {param: "ocean", surface: "surface", level: "waves", overlayType: "default"};
             const attr = {...configuration.attributes};
             if (attr.date === "current") {
                 configuration.save(ocean);
@@ -920,6 +926,9 @@ function init() {
     });
 
     // Add handlers for ocean animation types.
+    // The currents are a 2014 sample, so coming back to the waves also comes back to the latest forecast.
+    bindButtonToConfiguration("#animate-waves",
+        {param: "ocean", surface: "surface", level: "waves", date: "current", hour: ""}, ["param", "surface", "level"]);
     bindButtonToConfiguration("#animate-currents", {param: "ocean", surface: "surface", level: "currents"});
 
     // Add handlers for all overlay buttons.
@@ -928,6 +937,8 @@ function init() {
     });
     bindButtonToConfiguration("#overlay-wind", {param: "wind", overlayType: "default"});
     bindButtonToConfiguration("#overlay-ocean-off", {overlayType: "off"});
+    bindButtonToConfiguration("#overlay-waves-off", {overlayType: "off"});
+    bindButtonToConfiguration("#overlay-wave_height", {overlayType: "default"});
     bindButtonToConfiguration("#overlay-currents", {overlayType: "default"});
 
     // Add handlers for all projection buttons.
@@ -1018,15 +1029,18 @@ function buildTimeline() {
         }
     });
     gridAgent.on("reject", () => playing && (timer = setTimeout(advance, PLAY_DELAY)));  // skip missing steps
-    configuration.on("change:param", (model, param) => {
-        row.classed("invisible", param !== "wind");
-        if (param !== "wind") stop();
+    // The timeline follows the GFS forecast steps: wind mode and ocean waves (not the 2014 currents sample).
+    const usesTimeline = () => configuration.get("param") === "wind" || configuration.get("level") === "waves";
+    configuration.on("change", () => {
+        if (!changedKeys().some(k => k === "param" || k === "level")) return;
+        row.classed("invisible", times.length < 2 || !usesTimeline());
+        if (!usesTimeline()) stop();
     });
 
     µ.loadJson("/data/weather/catalog.json").then(catalog => {
         times = catalog.times.map(t => new Date(t));
         slider.attr("max", Math.max(times.length - 1, 0));
-        row.classed("invisible", times.length < 2 || configuration.get("param") !== "wind");
+        row.classed("invisible", times.length < 2 || !usesTimeline());
         sync();
     }).catch(() => row.classed("invisible", true));
 }

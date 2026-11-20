@@ -51,4 +51,18 @@ describe("products", () => {
             expect(product.scale.gradient(product.scale.bounds[1], 255)).toHaveLength(4);
         }
     });
+    it("builds GFS-Wave products: height vector with land as missing, and period overlay", () => {
+        const attr = {date: "2026/11/21", hour: "0300", param: "ocean", surface: "surface", level: "waves"};
+        const [waves, period] = productsFor({...attr, overlayType: "wave_period"});
+        expect(waves.paths).toEqual(["/data/weather/2026/11/21/0300-waves-surface-level-gfs-0.5.bin"]);
+        expect(period.paths).toEqual(["/data/weather/2026/11/21/0300-wave_period-surface-level-gfs-0.5.bin"]);
+        expect(productsFor({...attr, overlayType: "default"})).toHaveLength(1);
+
+        const header = {nx: 4, ny: 3, lo1: 0, la1: 90, dx: 90, dy: 90, refTime: "2026-11-21T00:00:00Z", forecastTime: 3};
+        const u = Float32Array.from([3, NaN, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+        const v = Float32Array.from([4, 0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]);
+        const g = buildGrid(waves.builder([{header, data: u}, {header, data: v}]));
+        expect(g.interpolate(45, 90)).toBeNull();  // touches the NaN (land) point
+        expect(g.interpolate(180, 0)).toEqual([3, 4, 5]);  // magnitude is the significant height
+    });
 });

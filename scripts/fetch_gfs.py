@@ -90,6 +90,10 @@ def grib_url(run, fhour):
     return f"{BUCKET}/gfs.{run:%Y%m%d}/{run:%H}/atmos/gfs.t{run:%H}z.pgrb2.1p00.f{fhour:03d}"
 
 
+def wave_url(run, fhour):
+    return f"{BUCKET}/gfs.{run:%Y%m%d}/{run:%H}/wave/gridded/gfswave.t{run:%H}z.global.0p25.f{fhour:03d}.grib2"
+
+
 def latest_run(fhours):
     """Finds the most recent run whose last needed forecast hour has been published."""
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0, tzinfo=None)
@@ -167,8 +171,8 @@ def precision_for(layer_type):
             "precipitation_rate": 7, "snow_depth": 3, "cape": 0, "total_cloud_cover": 0}.get(layer_type, 2)
 
 
-def file_name(stamp, layer_type, surface, level):
-    return "-".join(p for p in [stamp, layer_type, surface, level, "gfs", "1.0"] if p) + ".bin"
+def file_name(stamp, layer_type, surface, level, resolution="1.0"):
+    return "-".join(p for p in [stamp, layer_type, surface, level, "gfs", resolution] if p) + ".bin"
 
 
 def fetch_hour(run, fhour, specs):
@@ -201,13 +205,64 @@ def fetch_hour(run, fhour, specs):
     return layers
 
 
-def write_layers(layers, valid_time):
+WAVE_STRIDE = 2  # the 0.25° wave grid is thinned to 0.5°: plenty for the oceans, a quarter of the size
+
+
+def thin(header, values, stride):
+    """Keeps every stride-th grid point in both directions of a global grid."""
+    grid = values.reshape(header["ny"], header["nx"])[::stride, ::stride]
+    ny, nx = grid.shape
+    dx, dy = header["dx"] * stride, header["dy"] * stride
+    header = dict(header, nx=nx, ny=ny, dx=dx, dy=dy,
+                  lo2=header["lo1"] + (nx - 1) * dx, la2=header["la1"] - (ny - 1) * dy)
+    return header, grid.ravel()
+
+
+def fetch_waves(run, fhour):
+    """
+    Fetches GFS-Wave (WAVEWATCH III) significant height, peak direction and peak period. Returns two layers:
+    "waves", a vector whose direction is where the dominant waves travel and whose length is the significant
+    height (m), and "wave_period", the peak period (s). Land and sea ice are NaN.
+    """
+    url = wave_url(run, fhour)
+    try:
+        ranges = parse_idx(http_get(url + ".idx").decode())
+    except Exception:
+        print(f"  f{fhour:03d}: no wave data, skipped")
+        return {}
+    keys = ["HTSGW:surface", "DIRPW:surface", "PERPW:surface"]
+    if any(k not in ranges for k in keys):
+        print(f"  f{fhour:03d}: wave fields missing, skipped")
+        return {}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        decoded = dict(zip(keys, pool.map(lambda key: decode(http_get(url, ranges[key])), keys)))
+
+    def field(key):
+        header, values = decoded[key]
+        values = np.where(values >= 9999, np.nan, values)  # WAVEWATCH III marks land with 9999
+        return thin(header, values, WAVE_STRIDE)
+
+    h_header, height = field("HTSGW:surface")
+    _, direction = field("DIRPW:surface")
+    p_header, period = field("PERPW:surface")
+    # DIRPW is the direction the waves come FROM, clockwise from north; they travel the opposite way.
+    to = np.radians(direction + 180.0)
+    u, v = height * np.sin(to), height * np.cos(to)
+    u_header = dict(h_header, parameterName="u_waves")
+    v_header = dict(h_header, parameterName="v_waves")
+    return {
+        ("waves", "surface", "level"): [as_record(u_header, u, 2), as_record(v_header, v, 2)],
+        ("wave_period", "surface", "level"): [as_record(p_header, period, 1)],
+    }
+
+
+def write_layers(layers, valid_time, resolution="1.0"):
     directory = OUT / f"{valid_time:%Y}" / f"{valid_time:%m}" / f"{valid_time:%d}"
     directory.mkdir(parents=True, exist_ok=True)
     stamp = f"{valid_time:%H}00"
     written = []
     for (layer_type, surface, level), records in layers.items():
-        path = directory / file_name(stamp, layer_type, surface, level)
+        path = directory / file_name(stamp, layer_type, surface, level, resolution)
         path.write_bytes(encode_layer(records))
         written.append(path)
     return written
@@ -253,6 +308,7 @@ def main():
     parser.add_argument("--hours", default="0-24:3",
                         help='forecast hours, e.g. "0", "0,6,12" or "0-48:3" (default: 0-24:3)')
     parser.add_argument("--keep-days", type=int, default=3, help="delete data older than this many days (default: 3)")
+    parser.add_argument("--no-waves", action="store_true", help="skip the GFS-Wave ocean layers")
     parser.add_argument("--no-current", action="store_true", help='do not update the "current" layers')
     args = parser.parse_args()
 
@@ -267,6 +323,8 @@ def main():
         valid_time = run + dt.timedelta(hours=fhour)
         layers = fetch_hour(run, fhour, specs)
         files = write_layers(layers, valid_time)
+        if not args.no_waves:
+            files += write_layers(fetch_waves(run, fhour), valid_time, "0.5")
         print(f"  f{fhour:03d} -> {valid_time:%Y-%m-%d %H}Z: {len(files)} layers")
         if closest is None or abs(valid_time - now) < abs(closest[0] - now):
             closest = (valid_time, files)

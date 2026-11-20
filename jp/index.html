@@ -104,9 +104,15 @@
                 class="text-button" id="overlay-total_cloud_cover" title="全雲量">雲量</span>
             </p>
             <p class="ocean-mode invisible">動画 | <span
-                class="text-button" id="animate-currents" title="海流">海流</span>
+                class="text-button" id="animate-waves" title="波浪 (GFS-Wave)">波浪</span> – <span
+                class="text-button" id="animate-currents" title="海流 (2014年サンプル)">海流</span>
             </p>
-            <p class="ocean-mode invisible">レイヤー | <span
+            <p class="ocean-mode invisible" data-level="waves">レイヤー | <span
+                class="text-button" id="overlay-waves-off">無</span> – <span
+                class="text-button" id="overlay-wave_height" title="有義波高">波高</span> – <span
+                class="text-button" id="overlay-wave_period" title="ピーク周期">周期</span>
+            </p>
+            <p class="ocean-mode invisible" data-level="currents">レイヤー | <span
                 class="text-button" id="overlay-ocean-off">無</span> – <span
                 class="text-button" id="overlay-currents" title="海流">海流</span>
             </p>
