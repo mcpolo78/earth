@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 fetch_gfs - downloads GFS 1.0° weather layers from the NOAA open data bucket on AWS and converts them to the
-JSON format read by the app (the same layout the old Java "grib2json" tool produced).
+compact binary format read by the app (the headers of the old Java "grib2json" JSON, plus float32 values).
 
 Only the GRIB2 messages that are needed are downloaded, using HTTP range requests guided by the .idx files,
 so a full run is a few MB instead of the ~40 MB of the whole file.
@@ -14,13 +14,14 @@ Usage:
     python scripts/fetch_gfs.py --run 2026112006     # a specific run (yyyymmddhh)
 
 Output (under public/data/weather):
-    yyyy/mm/dd/hh00-<type>-<surface>-<level>-gfs-1.0.json   one file per layer, at its validity time
-    current/current-<type>-...-gfs-1.0.json                 copy of the layers valid closest to now
+    yyyy/mm/dd/hh00-<type>-<surface>-<level>-gfs-1.0.bin    one file per layer, at its validity time
+    current/current-<type>-...-gfs-1.0.bin                  copy of the layers valid closest to now
 """
 import argparse
 import datetime as dt
 import json
 import shutil
+import struct
 import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -143,8 +144,18 @@ def decode(message_bytes):
 
 
 def as_record(header, data, decimals):
-    rounded = np.round(data, decimals)
-    return {"header": header, "data": [None if np.isnan(v) else float(v) for v in rounded]}
+    return header, np.round(data, decimals).astype("<f4")
+
+
+def encode_layer(records):
+    """
+    Encodes records in the compact "EGB1" binary format read by the app (see parseBinaryLayer in src/micro.js):
+    magic, uint32 LE header length, JSON array of headers, padding to 4 bytes, then float32 LE values per record.
+    """
+    headers = json.dumps([header for header, _ in records], separators=(",", ":")).encode()
+    padding = b"\0" * ((4 - (8 + len(headers)) % 4) % 4)
+    body = b"".join(values.tobytes() for _, values in records)
+    return b"EGB1" + struct.pack("<I", len(headers)) + headers + padding + body
 
 
 def precision_for(layer_type):
@@ -152,7 +163,7 @@ def precision_for(layer_type):
 
 
 def file_name(stamp, layer_type, surface, level):
-    return "-".join(p for p in [stamp, layer_type, surface, level, "gfs", "1.0"] if p) + ".json"
+    return "-".join(p for p in [stamp, layer_type, surface, level, "gfs", "1.0"] if p) + ".bin"
 
 
 def fetch_hour(run, fhour, specs):
@@ -192,7 +203,7 @@ def write_layers(layers, valid_time):
     written = []
     for (layer_type, surface, level), records in layers.items():
         path = directory / file_name(stamp, layer_type, surface, level)
-        path.write_text(json.dumps(records, separators=(",", ":")))
+        path.write_bytes(encode_layer(records))
         written.append(path)
     return written
 

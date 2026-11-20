@@ -12,26 +12,20 @@ import * as µ from "./micro.js";
 import { Emitter } from "./events.js";
 import { globes } from "./globes.js";
 import * as products from "./products.js";
+import { createAnimator } from "./particles.js";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
-const MAX_TASK_TIME = 100;                  // amount of time before a task yields control (millis)
-const MIN_SLEEP_TIME = 25;                  // amount of time a task waits before resuming (millis)
 const MIN_MOVE = 4;                         // slack before a drag operation beings (pixels)
-const MOVE_END_WAIT = 1000;                 // time to wait for a move operation to be considered done (millis)
+const MOVE_END_WAIT = 300;                  // time to wait for a move operation to be considered done (millis)
 
 const OVERLAY_ALPHA = Math.floor(0.4 * 255);  // overlay transparency (on scale [0, 255])
-const INTENSITY_SCALE_STEP = 10;            // step size of particle intensity color scale
-const MAX_PARTICLE_AGE = 100;               // max number of frames a particle is drawn before regeneration
-const PARTICLE_LINE_WIDTH = 1.0;            // line width of a drawn particle
+const OVERLAY_STEP = 2;                     // overlay resolution (pixels per data sample) when the globe is still
+const OVERLAY_STEP_MOVING = 6;              // coarser overlay resolution while the globe is being moved
 const PARTICLE_MULTIPLIER = 7;              // particle count scalar (completely arbitrary--this values looks nice)
 const PARTICLE_REDUCTION = 0.75;            // reduce particle count to this much of normal for mobile devices
-const FRAME_RATE = 40;                      // desired milliseconds per frame
 
-const NULL_WIND_VECTOR = [NaN, NaN, null];  // singleton for undefined location outside the vector field [u, v, mag]
-const HOLE_VECTOR = [NaN, NaN, null];       // singleton that signifies a hole in the vector field
-const TRANSPARENT_BLACK = [0, 0, 0, 0];     // singleton 0 rgba
 const REMAINING = "▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫▫";   // glyphs for remaining progress bar
 const COMPLETED = "▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪▪";   // glyphs for completed progress bar
 
@@ -83,9 +77,8 @@ const meshAgent = newAgent();      // map data for the earth
 const globeAgent = newAgent();     // the model of the globe
 const gridAgent = newAgent();      // the grid of weather data
 const rendererAgent = newAgent();  // the globe SVG renderer
-const fieldAgent = newAgent();     // the interpolated wind vector field
-const animatorAgent = newAgent();  // the wind animator
-const overlayAgent = newAgent();   // color overlay over the animation
+const overlay = buildOverlayRenderer();  // color overlay, rendered in a web worker
+let animator = null;               // the wind particle animator
 
 /**
  * @returns {Array|undefined} the [x, y] position of the pointer (mouse or first touch) for a d3 event.
@@ -253,11 +246,12 @@ async function buildGrids() {
     //         this allows us to use the product for navigation and other state.
     const cancel = this.cancel;
     downloadsInProgress++;
+    const attr = {...configuration.attributes};
     try {
-        const loaded = await Promise.all(products.productsFor(configuration.attributes)
+        const loaded = await Promise.all(products.productsFor(attr)
             .map(async product => (await product).load(cancel)));
         log.timeEnd("build grids");
-        return {primaryGrid: loaded[0], overlayGrid: loaded[1] || loaded[0]};
+        return {primaryGrid: loaded[0], overlayGrid: loaded[1] || loaded[0], attr};
     } finally {
         downloadsInProgress--;
     }
@@ -304,10 +298,10 @@ function buildRenderer(mesh, globe) {
 
     function drawLocationMark(point, coord) {
         // show the location on the map if defined
-        if (fieldAgent.value() && !fieldAgent.value().isInsideBoundary(point[0], point[1])) {
-            return;  // outside the field boundary, so ignore.
+        if (!isOnGlobe(globe, point, coord)) {
+            return;  // not on the map, so ignore.
         }
-        if (coord && Number.isFinite(coord[0]) && Number.isFinite(coord[1])) {
+        {
             let mark = d3.select(".location-mark");
             if (!mark.node()) {
                 mark = d3.select("#foreground").append("path").attr("class", "location-mark");
@@ -356,279 +350,144 @@ function buildRenderer(mesh, globe) {
     return "ready";
 }
 
-function createMask(globe) {
-    if (!globe) return null;
-
-    log.time("render mask");
-
-    // Create a detached canvas, ask the model to define the mask polygon, then fill with an opaque color.
-    const width = view.width, height = view.height;
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = globe.defineMask(canvas.getContext("2d", {willReadFrequently: true}));
-    context.fillStyle = "rgba(255, 0, 0, 1)";
-    context.fill();
-
-    const imageData = context.getImageData(0, 0, width, height);
-    const data = imageData.data;  // layout: [r, g, b, a, r, g, b, a, ...]
-    log.timeEnd("render mask");
-    return {
-        imageData,
-        isVisible(x, y) {
-            const i = (y * width + x) * 4;
-            return data[i + 3] > 0;  // non-zero alpha means pixel is visible
-        },
-        set(x, y, rgba) {
-            const i = (y * width + x) * 4;
-            data[i    ] = rgba[0];
-            data[i + 1] = rgba[1];
-            data[i + 2] = rgba[2];
-            data[i + 3] = rgba[3];
-            return this;
-        }
-    };
+/**
+ * @returns {Boolean} true if the screen point shows the given coordinates on the map, i.e. the point is not in
+ *          the empty space around the globe or on its far side.
+ */
+function isOnGlobe(globe, point, coord) {
+    if (!globe || !point || !coord || !Number.isFinite(coord[0]) || !Number.isFinite(coord[1])) return false;
+    const p = projectVisible(globe, coord);
+    return !!p && Math.abs(p[0] - point[0]) <= 1 && Math.abs(p[1] - point[1]) <= 1;
 }
 
-function createField(columns, bounds, mask) {
-
-    /**
-     * @returns {Array} wind vector [u, v, magnitude] at the point (x, y), or [NaN, NaN, null] if wind
-     *          is undefined at that point.
-     */
-    function field(x, y) {
-        const column = columns[Math.round(x)];
-        return column && column[Math.round(y)] || NULL_WIND_VECTOR;
-    }
-
-    /** @returns {boolean} true if the field is valid at the point (x, y) */
-    field.isDefined = function(x, y) {
-        return field(x, y)[2] !== null;
-    };
-
-    /**
-     * @returns {boolean} true if the point (x, y) lies inside the outer boundary of the vector field, even if
-     *          the vector field has a hole (is undefined) at that point, such as at an island in a field of
-     *          ocean currents.
-     */
-    field.isInsideBoundary = function(x, y) {
-        return field(x, y) !== NULL_WIND_VECTOR;
-    };
-
-    // Frees the massive "columns" array for GC.
-    field.release = function() {
-        columns = [];
-    };
-
-    field.randomize = function(o) {  // UNDONE: this method is terrible
-        let x, y;
-        let safetyNet = 0;
-        do {
-            x = µ.randomInt(bounds.x, bounds.xMax);
-            y = µ.randomInt(bounds.y, bounds.yMax);
-        } while (!field.isDefined(x, y) && safetyNet++ < 30);
-        o.x = x;
-        o.y = y;
-        return o;
-    };
-
-    field.overlay = mask.imageData;
-
-    return field;
+/** @returns {Array|null} the screen position of coord, or null when the projection clips it away. */
+function projectVisible(globe, coord) {
+    let p = null;
+    globe.projection.stream({point(x, y) { p = [x, y]; }}).point(coord[0], coord[1]);
+    return p;
 }
 
 /**
- * Calculate distortion of the wind vector caused by the shape of the projection at point (x, y). The wind
- * vector is modified in place and returned by this function.
+ * Starts (or restarts) the particle animation for the current globe and grids. Particles live in geographic
+ * coordinates, so the animation keeps running while the globe is dragged or zoomed.
  */
-function distort(projection, λ, φ, x, y, scale, wind) {
-    const u = wind[0] * scale;
-    const v = wind[1] * scale;
-    const d = µ.distortion(projection, λ, φ, x, y);
-
-    // Scale distortion vectors by u and v, then add.
-    wind[0] = d[0] * u + d[2] * v;
-    wind[1] = d[1] * u + d[3] * v;
-    return wind;
-}
-
-function interpolateField(globe, grids) {
-    if (!globe || !grids) return null;
-
-    const mask = createMask(globe);
-    const primaryGrid = grids.primaryGrid;
-    const overlayGrid = grids.overlayGrid;
-
-    log.time("interpolating field");
-    const cancel = this.cancel;
-
-    const projection = globe.projection;
-    const bounds = globe.bounds(view);
-    // How fast particles move on the screen (arbitrary value chosen for aesthetics).
-    const velocityScale = bounds.height * primaryGrid.particles.velocityScale;
-
-    const columns = [];
-    const point = [];
-    let x = bounds.x;
-    const interpolate = primaryGrid.interpolate;
-    const overlayInterpolate = overlayGrid.interpolate;
-    const hasDistinctOverlay = primaryGrid !== overlayGrid;
-    const scale = overlayGrid.scale;
-
-    function interpolateColumn(x) {
-        const column = [];
-        for (let y = bounds.y; y <= bounds.yMax; y += 2) {
-            if (mask.isVisible(x, y)) {
-                point[0] = x; point[1] = y;
-                const coord = projection.invert(point);
-                let color = TRANSPARENT_BLACK;
-                let wind = null;
-                if (coord) {
-                    const λ = coord[0], φ = coord[1];
-                    if (isFinite(λ)) {
-                        wind = interpolate(λ, φ);
-                        let scalar = null;
-                        if (wind) {
-                            wind = distort(projection, λ, φ, x, y, velocityScale, wind);
-                            scalar = wind[2];
-                        }
-                        if (hasDistinctOverlay) {
-                            scalar = overlayInterpolate(λ, φ);
-                        }
-                        if (µ.isValue(scalar)) {
-                            color = scale.gradient(scalar, OVERLAY_ALPHA);
-                        }
-                    }
-                }
-                column[y + 1] = column[y] = wind || HOLE_VECTOR;
-                mask.set(x, y, color).set(x + 1, y, color).set(x, y + 1, color).set(x + 1, y + 1, color);
-            }
-        }
-        columns[x + 1] = columns[x] = column;
-    }
-
-    report.status("");
-
-    return new Promise((resolve, reject) => {
-        (function batchInterpolate() {
-            try {
-                if (!cancel.requested) {
-                    const start = Date.now();
-                    while (x < bounds.xMax) {
-                        interpolateColumn(x);
-                        x += 2;
-                        if ((Date.now() - start) > MAX_TASK_TIME) {
-                            // Interpolation is taking too long. Schedule the next batch for later and yield.
-                            report.progress((x - bounds.x) / (bounds.xMax - bounds.x));
-                            setTimeout(batchInterpolate, MIN_SLEEP_TIME);
-                            return;
-                        }
-                    }
-                }
-                resolve(createField(columns, bounds, mask));
-            }
-            catch (e) {
-                reject(e);
-            }
-            report.progress(1);  // 100% complete
-            log.timeEnd("interpolating field");
-        })();
-    });
-}
-
-function animate(globe, field, grids) {
-    if (!globe || !field || !grids) return;
-
-    const cancel = this.cancel;
-    const bounds = globe.bounds(view);
-    // maxIntensity is the velocity at which particle color intensity is maximum
-    const colorStyles = µ.windIntensityColorScale(INTENSITY_SCALE_STEP, grids.primaryGrid.particles.maxIntensity);
-    const buckets = colorStyles.map(() => []);
-    let particleCount = Math.round(bounds.width * PARTICLE_MULTIPLIER);
+function startAnimation() {
+    stopAnimation(true);
+    const globe = globeAgent.value(), grids = gridAgent.value();
+    if (!globe || !grids || !grids.primaryGrid.particles) return;
+    let particleCount = globe.bounds(view).width * PARTICLE_MULTIPLIER;
     if (µ.isMobile()) {
         particleCount *= PARTICLE_REDUCTION;
     }
-    const fadeFillStyle = µ.isFF() ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)";  // FF Mac alpha behaves oddly
+    animator = createAnimator(d3.select("#animation").node(), globe, grids.primaryGrid, {
+        particleCount,
+        getView: () => view
+    });
+    animator.globe = globe;
+    animator.grids = grids;
+    report.status("");
+    log.debug("particle count: " + animator.particleCount);
+}
 
-    log.debug("particle count: " + particleCount);
-    const particles = [];
-    for (let i = 0; i < particleCount; i++) {
-        particles.push(field.randomize({age: µ.randomInt(0, MAX_PARTICLE_AGE)}));
+function stopAnimation(alsoClearCanvas) {
+    if (animator) {
+        animator.stop(alsoClearCanvas);
+        animator = null;
+    }
+    else if (alsoClearCanvas) {
+        µ.clearCanvas(d3.select("#animation").node());
+    }
+}
+
+/**
+ * The overlay renderer sends the overlay grid's raw files to a web worker once per data change, then asks it to
+ * render the current view. Only one render is in flight at a time; while it runs, newer requests replace each
+ * other, so a fast drag never queues up stale work.
+ */
+function buildOverlayRenderer() {
+    const canvas = d3.select("#overlay").node();
+    const worker = new Worker(new URL("./overlay-worker.js", import.meta.url), {type: "module"});
+    let version = 0, ready = false, inFlight = false, pending = null, enabled = false, nextId = 0;
+
+    function flush() {
+        if (inFlight || !ready || !pending) return;
+        inFlight = true;
+        worker.postMessage(pending);
+        pending = null;
     }
 
-    function evolve() {
-        buckets.forEach(bucket => { bucket.length = 0; });
-        particles.forEach(particle => {
-            if (particle.age > MAX_PARTICLE_AGE) {
-                field.randomize(particle).age = 0;
-            }
-            const x = particle.x;
-            const y = particle.y;
-            const v = field(x, y);  // vector at current position
-            const m = v[2];
-            if (m === null) {
-                particle.age = MAX_PARTICLE_AGE;  // particle has escaped the grid, never to return...
-            }
-            else {
-                const xt = x + v[0];
-                const yt = y + v[1];
-                if (field.isDefined(xt, yt)) {
-                    // Path from (x,y) to (xt,yt) is visible, so add this particle to the appropriate draw bucket.
-                    particle.xt = xt;
-                    particle.yt = yt;
-                    buckets[colorStyles.indexFor(m)].push(particle);
+    function draw(data) {
+        if (data.width !== canvas.width || data.height !== canvas.height) return;  // view resized meanwhile
+        const ctx = canvas.getContext("2d");
+        ctx.putImageData(new ImageData(new Uint8ClampedArray(data.buffer), data.width, data.height), 0, 0);
+        drawGridPoints(ctx, (gridAgent.value() || {}).overlayGrid, globeAgent.value());
+    }
+
+    worker.onmessage = ({data}) => {
+        switch (data.type) {
+            case "grid-ready":
+                if (data.version === version) {
+                    ready = true;
+                    flush();
                 }
-                else {
-                    // Particle isn't visible, but it still moves through the field.
-                    particle.x = xt;
-                    particle.y = yt;
-                }
-            }
-            particle.age += 1;
-        });
-    }
+                break;
+            case "rendered":
+                inFlight = false;
+                if (data.version === version && enabled) draw(data);
+                flush();
+                break;
+            case "error":
+                inFlight = false;
+                log.error(data.message);
+                flush();
+                break;
+        }
+    };
 
-    const g = d3.select("#animation").node().getContext("2d");
-    g.lineWidth = PARTICLE_LINE_WIDTH;
-    g.fillStyle = fadeFillStyle;
-
-    function draw() {
-        // Fade existing particle trails.
-        const prev = g.globalCompositeOperation;
-        g.globalCompositeOperation = "destination-in";
-        g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-        g.globalCompositeOperation = prev;
-
-        // Draw new particle trails.
-        buckets.forEach((bucket, i) => {
-            if (bucket.length > 0) {
-                g.beginPath();
-                g.strokeStyle = colorStyles[i];
-                bucket.forEach(particle => {
-                    g.moveTo(particle.x, particle.y);
-                    g.lineTo(particle.xt, particle.yt);
-                    particle.x = particle.xt;
-                    particle.y = particle.yt;
-                });
-                g.stroke();
-            }
-        });
-    }
-
-    (function frame() {
-        try {
-            if (cancel.requested) {
-                field.release();
+    return {
+        /** Hands the overlay grid of a newly loaded set of grids to the worker. */
+        setGrids(grids) {
+            version++;
+            ready = false;
+            pending = null;
+            const index = grids.overlayGrid === grids.primaryGrid ? 0 : 1;
+            worker.postMessage({type: "grid", version, attr: grids.attr, index, files: grids.overlayGrid.files});
+        },
+        setEnabled(value) {
+            enabled = value;
+            if (!enabled) this.clear();
+        },
+        /** Requests a render of the current view at the given resolution (pixels per sample). */
+        request(step) {
+            const globe = globeAgent.value();
+            if (!globe) return;
+            if (!enabled) {
+                this.clear();
+                drawGridPoints(canvas.getContext("2d"), (gridAgent.value() || {}).overlayGrid, globe);
                 return;
             }
-            evolve();
-            draw();
-            setTimeout(frame, FRAME_RATE);
+            const projection = globe.projection;
+            pending = {
+                type: "render",
+                id: nextId++,
+                version,
+                projection: {
+                    name: configuration.get("projection"),
+                    rotate: projection.rotate(),
+                    scale: projection.scale(),
+                    translate: projection.translate()
+                },
+                width: canvas.width,
+                height: canvas.height,
+                step,
+                alpha: OVERLAY_ALPHA
+            };
+            flush();
+        },
+        clear() {
+            µ.clearCanvas(canvas);
         }
-        catch (e) {
-            report.error(e);
-        }
-    })();
+    };
 }
 
 function drawGridPoints(ctx, grid, globe) {
@@ -648,40 +507,27 @@ function drawGridPoints(ctx, grid, globe) {
     });
 }
 
-function drawOverlay(field, overlayType) {
-    if (!field) return;
-
-    const ctx = d3.select("#overlay").node().getContext("2d"), grid = (gridAgent.value() || {}).overlayGrid;
-
-    µ.clearCanvas(d3.select("#overlay").node());
+/** Draws the color bar for the overlay grid in the menu, with a tooltip showing the value under the mouse. */
+function drawScaleBar(grid) {
     µ.clearCanvas(d3.select("#scale").node());
-    if (overlayType) {
-        if (overlayType !== "off") {
-            ctx.putImageData(field.overlay, 0, 0);
-        }
-        drawGridPoints(ctx, grid, globeAgent.value());
+    if (!grid) return;
+    const colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
+    const c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
+    for (let i = 0; i <= n; i++) {
+        const rgb = scale.gradient(µ.spread(i / n, bounds[0], bounds[1]), 1);
+        g.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
+        g.fillRect(i, 0, 1, c.height);
     }
 
-    if (grid) {
-        // Draw color bar for reference.
-        const colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
-        const c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
-        for (let i = 0; i <= n; i++) {
-            const rgb = scale.gradient(µ.spread(i / n, bounds[0], bounds[1]), 1);
-            g.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
-            g.fillRect(i, 0, 1, c.height);
-        }
-
-        // Show tooltip on hover.
-        colorBar.on("mousemove", function(event) {
-            const x = d3.pointer(event, this)[0];
-            const pct = µ.clamp((Math.round(x) - 2) / (n - 2), 0, 1);
-            const value = µ.spread(pct, bounds[0], bounds[1]);
-            const elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
-            const units = createUnitToggle(elementId, grid).value();
-            colorBar.attr("title", µ.formatScalar(value, units) + " " + units.label);
-        });
-    }
+    // Show tooltip on hover.
+    colorBar.on("mousemove", function(event) {
+        const x = d3.pointer(event, this)[0];
+        const pct = µ.clamp((Math.round(x) - 2) / (n - 2), 0, 1);
+        const value = µ.spread(pct, bounds[0], bounds[1]);
+        const elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
+        const units = createUnitToggle(elementId, grid).value();
+        colorBar.attr("title", µ.formatScalar(value, units) + " " + units.label);
+    });
 }
 
 /**
@@ -780,8 +626,8 @@ let activeLocation = {};
 function showLocationDetails(point, coord) {
     point = point || [];
     coord = coord || [];
-    const grids = gridAgent.value(), field = fieldAgent.value(), λ = coord[0], φ = coord[1];
-    if (!field || !field.isInsideBoundary(point[0], point[1])) {
+    const grids = gridAgent.value(), λ = coord[0], φ = coord[1];
+    if (!isOnGlobe(globeAgent.value(), point, coord)) {
         return;
     }
 
@@ -793,7 +639,7 @@ function showLocationDetails(point, coord) {
         d3.select("#location-close").classed("invisible", false);
     }
 
-    if (field.isDefined(point[0], point[1]) && grids) {
+    if (grids) {
         const wind = grids.primaryGrid.interpolate(λ, φ);
         if (µ.isValue(wind)) {
             showWindAtLocation(wind, grids.primaryGrid);
@@ -808,7 +654,11 @@ function showLocationDetails(point, coord) {
 }
 
 function updateLocationDetails() {
-    showLocationDetails(activeLocation.point, activeLocation.coord);
+    const globe = globeAgent.value(), coord = activeLocation.coord;
+    if (globe && coord) {
+        // the globe may have moved since the location was picked, so find where it is on screen now
+        showLocationDetails(projectVisible(globe, coord), coord);
+    }
 }
 
 function clearLocationDetails(clearEverything) {
@@ -821,13 +671,6 @@ function clearLocationDetails(clearEverything) {
     if (clearEverything) {
         activeLocation = {};
         d3.select(".location-mark").remove();
-    }
-}
-
-function stopCurrentAnimation(alsoClearCanvas) {
-    animatorAgent.cancel();
-    if (alsoClearCanvas) {
-        µ.clearCanvas(d3.select("#animation").node());
     }
 }
 
@@ -946,40 +789,43 @@ function init() {
     rendererAgent.listenTo(meshAgent, "update", startRendering);
     rendererAgent.listenTo(globeAgent, "update", startRendering);
 
-    function startInterpolation() {
-        fieldAgent.submit(interpolateField, globeAgent.value(), gridAgent.value());
-    }
-    function cancelInterpolation() {
-        fieldAgent.cancel();
-    }
-    fieldAgent.listenTo(gridAgent, "update", startInterpolation);
-    fieldAgent.listenTo(rendererAgent, "render", startInterpolation);
-    fieldAgent.listenTo(rendererAgent, "start", cancelInterpolation);
-    fieldAgent.listenTo(rendererAgent, "redraw", cancelInterpolation);
+    // Particle animation: (re)start whenever the data or the globe changes. It keeps running during moves.
+    gridAgent.on("submit", () => stopAnimation(false));
+    gridAgent.on("update", startAnimation);
+    globeAgent.on("update", startAnimation);
+    rendererAgent.on("start", () => animator && animator.setMoving(true));
+    rendererAgent.on("render", function() {
+        report.status("");
+        if (!animator || animator.globe !== globeAgent.value() || animator.grids !== gridAgent.value()) {
+            startAnimation();
+        }
+        else {
+            animator.setMoving(false);
+        }
+    });
 
-    animatorAgent.listenTo(fieldAgent, "update", function(field) {
-        animatorAgent.submit(animate, globeAgent.value(), field, gridAgent.value());
+    // Color overlay: rendered by a worker, coarse while the globe moves and fine when it stops.
+    const overlayEnabled = () => configuration.get("overlayType") !== "off";
+    gridAgent.on("update", function(grids) {
+        overlay.setGrids(grids);
+        overlay.setEnabled(overlayEnabled());
+        overlay.request(OVERLAY_STEP);
+        drawScaleBar(grids.overlayGrid);
     });
-    animatorAgent.listenTo(rendererAgent, "start", () => stopCurrentAnimation(true));
-    animatorAgent.listenTo(gridAgent, "submit", () => stopCurrentAnimation(false));
-    animatorAgent.listenTo(fieldAgent, "submit", () => stopCurrentAnimation(false));
-
-    overlayAgent.listenTo(fieldAgent, "update", function() {
-        overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
-    });
-    overlayAgent.listenTo(rendererAgent, "start", function() {
-        overlayAgent.submit(drawOverlay, fieldAgent.value(), null);
-    });
-    overlayAgent.listenTo(configuration, "change", function() {
+    rendererAgent.on("start", () => overlay.request(OVERLAY_STEP_MOVING));
+    rendererAgent.on("redraw", () => overlay.request(OVERLAY_STEP_MOVING));
+    rendererAgent.on("render", () => overlay.request(OVERLAY_STEP));
+    configuration.on("change", function() {
         // if only overlay relevant flags have changed...
         if (changedKeys().some(k => k === "overlayType" || k === "showGridPoints")) {
-            overlayAgent.submit(drawOverlay, fieldAgent.value(), configuration.get("overlayType"));
+            overlay.setEnabled(overlayEnabled());
+            overlay.request(OVERLAY_STEP);
         }
     });
 
     // Add event handlers for showing, updating, and removing location details.
     inputController.on("click", showLocationDetails);
-    fieldAgent.on("update", updateLocationDetails);
+    gridAgent.on("update", updateLocationDetails);
     d3.select("#location-close").on("click", () => clearLocationDetails(true));
 
     // Modify menu depending on what mode we're in.
@@ -1027,7 +873,7 @@ function init() {
                     }
                 }).catch(report.error);
             }
-            stopCurrentAnimation(true);  // cleanup particle artifacts over continents
+            stopAnimation(true);  // cleanup particle artifacts over continents
         }
     });
     configuration.on("change:param", function(model, param) {

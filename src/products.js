@@ -29,15 +29,17 @@ function buildProduct(overrides) {
             return gfsStep(this.date, step);
         },
         async load(cancel) {
-            const files = await Promise.all(this.paths.map(µ.loadJson));
-            return cancel.requested ? null : Object.assign(this, buildGrid(this.builder(...files)));
+            const files = await Promise.all(this.paths.map(µ.loadData));
+            if (cancel.requested) return null;
+            this.files = files;  // kept so the overlay worker can build its own copy of the grid
+            return Object.assign(this, buildGrid(this.builder(...files)));
         }
     }, overrides);
 }
 
 function gfs1p0degPath(attr, type, surface, level) {
     const dir = attr.date, stamp = dir === "current" ? "current" : attr.hour;
-    const file = [stamp, type, surface, level, "gfs", "1.0"].filter(µ.isValue).join("-") + ".json";
+    const file = [stamp, type, surface, level, "gfs", "1.0"].filter(µ.isValue).join("-") + ".bin";
     return [WEATHER_PATH, dir, file].join("/");
 }
 
@@ -554,7 +556,8 @@ export function buildGrid(builder) {
     for (let j = 0; j < nj; j++) {
         const row = [];
         for (let i = 0; i < ni; i++, p++) {
-            row[i] = builder.data(p);
+            const value = builder.data(p);
+            row[i] = Number.isNaN(value) ? null : value;  // binary layers mark missing data as NaN
         }
         if (isContinuous) {
             // For wrapped grids, duplicate first column as last column to simplify interpolation logic

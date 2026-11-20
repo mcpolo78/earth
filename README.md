@@ -29,7 +29,8 @@ Données météo
 `scripts/fetch_gfs.py` lit le [GFS](https://www.ncei.noaa.gov/products/weather-climate-models/global-forecast)
 de la NOAA sur le bucket public AWS `noaa-gfs-bdp-pds`. Il ne télécharge que les messages GRIB2 utiles grâce
 aux fichiers `.idx` (requêtes HTTP partielles), les décode avec [ecCodes](https://github.com/ecmwf/eccodes),
-puis écrit le même format JSON qu'utilisait l'ancien outil Java `grib2json`. La densité de l'air est calculée
+puis écrit un format binaire compact (`.bin` : en-têtes JSON du format `grib2json` d'origine suivis des valeurs en
+float32), 30 à 40 % plus léger que le JSON et sans analyse de texte côté navigateur. La densité de l'air est calculée
 à partir de la température (loi des gaz parfaits). Les fichiers produits vont dans `public/data/weather/`,
 qui n'est pas versionné.
 
@@ -40,6 +41,11 @@ Ce qui a changé par rapport à l'original
 * Code en modules ES (`src/`), D3 v3 → D3 v7 (+ d3-geo-projection, d3-geo-polygon), topojson-client.
 * underscore, backbone et when.js supprimés : un petit `Emitter` (`src/events.js`) et les Promises natives.
 * Le globe se redimensionne avec la fenêtre.
+* Les particules de vent vivent en coordonnées géographiques et sont reprojetées à chaque image
+  (`src/particles.js`) : l'animation continue pendant qu'on fait tourner ou zoomer le globe, au lieu de
+  disparaître puis d'être recalculée pixel par pixel.
+* Le calque de couleurs est calculé dans un Web Worker (`src/overlay-worker.js`) : grossier pendant le mouvement,
+  fin à l'arrêt, sans bloquer l'animation.
 * Tests QUnit remplacés par Vitest (`test/`).
 
 ---

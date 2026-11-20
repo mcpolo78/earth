@@ -63,3 +63,25 @@ describe("agent", () => {
         expect(error).toBe("boom");
     });
 });
+
+describe("binary layers", () => {
+    it("parses the EGB1 format written by fetch_gfs.py", () => {
+        const headers = [{nx: 2, ny: 1, la1: 0}, {nx: 2, ny: 1, la1: 0}];
+        const json = new TextEncoder().encode(JSON.stringify(headers));
+        const padding = (4 - (8 + json.length) % 4) % 4;
+        const buffer = new ArrayBuffer(8 + json.length + padding + 4 * 4);
+        const bytes = new Uint8Array(buffer);
+        bytes.set([69, 71, 66, 49]);  // "EGB1"
+        new DataView(buffer).setUint32(4, json.length, true);
+        bytes.set(json, 8);
+        new Float32Array(buffer, 8 + json.length + padding, 4).set([1.5, NaN, -2, 3]);
+        const records = µ.parseBinaryLayer(buffer);
+        expect(records).toHaveLength(2);
+        expect(records[0].header).toEqual(headers[0]);
+        expect(Array.from(records[0].data)).toEqual([1.5, NaN]);
+        expect(Array.from(records[1].data)).toEqual([-2, 3]);
+    });
+    it("rejects other files", () => {
+        expect(() => µ.parseBinaryLayer(new ArrayBuffer(16))).toThrow();
+    });
+});
