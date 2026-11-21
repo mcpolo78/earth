@@ -49,7 +49,7 @@ Déploiement (Vercel)
 `vercel.json` installe Python et ecCodes dans un venv pendant le build, lance `scripts/fetch_gfs.py`
 (environ 30 secondes), puis `vite build` : chaque déploiement embarque les dernières données GFS, houle et
 qualité de l'air. Pour les garder à jour, `.github/workflows/refresh-data.yml` appelle un Deploy Hook Vercel
-toutes les 6 heures : créer le hook dans Vercel (Settings → Git → Deploy Hooks, branche `main`) et coller son
+une fois par jour (04:30 UTC) : créer le hook dans Vercel (Settings → Git → Deploy Hooks, branche `main`) et coller son
 URL dans le secret GitHub `VERCEL_DEPLOY_HOOK`.
 
 Ce qui a changé par rapport à l'original

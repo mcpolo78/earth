@@ -1,11 +1,11 @@
-# Redéploie le site sur Vercel toutes les 6 heures pour récupérer le dernier run GFS
+# Redéploie le site sur Vercel une fois par jour pour récupérer le dernier run GFS
 # (les données sont téléchargées pendant le build Vercel, voir vercel.json).
 # Nécessite le secret VERCEL_DEPLOY_HOOK (URL d'un Deploy Hook Vercel) ; sans lui, le job ne fait rien.
 name: Rafraîchir les données météo
 
 on:
   schedule:
-    - cron: "30 4,10,16,22 * * *"   # environ 4 h 30 après chaque run GFS (00/06/12/18 UTC)
+    - cron: "30 4 * * *"   # 04:30 UTC, environ 4 h 30 après le run GFS de 00 UTC
   workflow_dispatch:
 
 jobs:
