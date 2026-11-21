@@ -84,6 +84,20 @@ body {
     will-change: transform;
 }
 
+#webgl-globe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    cursor: grab;
+    touch-action: none;
+}
+
+#webgl-globe:active {
+    cursor: grabbing;
+}
+
 #sponsor {
     position: absolute;
     text-align: right;

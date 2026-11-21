@@ -56,6 +56,9 @@ Ce qui a changé par rapport à l'original
 * Le calque de couleurs est calculé dans un Web Worker (`src/overlay-worker.js`) : grossier pendant le mouvement,
   fin à l'arrêt, sans bloquer l'animation.
 * Tests QUnit remplacés par Vitest (`test/`).
+* Globe 3D (bouton « 3D » dans Projection) : WebGL avec three.js, chargé seulement quand on l'utilise. Les données,
+  les côtes et les particules sont dessinées dans des textures équirectangulaires plaquées sur une sphère, avec une
+  atmosphère lumineuse. Glisser pour tourner, molette pour zoomer, clic pour lire les valeurs d'un point.
 
 ---
 

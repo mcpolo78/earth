@@ -17,6 +17,9 @@ const MAX_SEGMENT = 40;            // longest segment (px) drawn in one frame; l
 const POLAR_LIMIT = 89;            // particles closer to the poles than this are regenerated
 const HISTORY = 8;                 // positions remembered per particle, to redraw trails while the globe moves
 const HISTORY_INTERVAL = 3;        // base frames between two remembered positions
+const SWEEP_INTERVAL = 25;         // base frames between two sweeps of faint trail pixels
+const SWEEP_ALPHA = 40;            // trail pixels fainter than this (of 255) lose SWEEP_STEP more alpha per sweep
+const SWEEP_STEP = 12;
 
 /**
  * @param canvas the animation canvas
@@ -26,7 +29,7 @@ const HISTORY_INTERVAL = 3;        // base frames between two remembered positio
  */
 export function createAnimator(canvas, globe, initialGrid, options) {
     let grid = initialGrid;
-    const g = canvas.getContext("2d");
+    const g = canvas.getContext("2d", {willReadFrequently: false});
     const projection = globe.projection;
     const colorStyles = µ.windIntensityColorScale(INTENSITY_SCALE_STEP, grid.particles.maxIntensity);
     const buckets = colorStyles.map(() => []);
@@ -163,7 +166,28 @@ export function createAnimator(canvas, globe, initialGrid, options) {
         }
     }
 
+    /**
+     * The fade multiplies alpha by ~0.97 per frame, but with 8-bit alpha a faint pixel rounds back to its own value
+     * and never disappears. Left alone, those pixels pile up into dots and haze, so fade them out a step at a time.
+     */
+    let sinceSweep = 0;
+    function sweepFaintPixels() {
+        const image = g.getImageData(0, 0, canvas.width, canvas.height), data = image.data;
+        for (let i = 3; i < data.length; i += 4) {
+            const a = data[i];
+            if (a !== 0 && a < SWEEP_ALPHA) {
+                data[i] = a > SWEEP_STEP ? a - SWEEP_STEP : 0;
+            }
+        }
+        g.putImageData(image, 0, 0);
+    }
+
     function draw(dtFrames) {
+        sinceSweep += dtFrames;
+        if (sinceSweep >= SWEEP_INTERVAL && !moving) {
+            sinceSweep = 0;
+            sweepFaintPixels();
+        }
         if (moving) {
             // The map moves under the trails, so redraw every trail from its remembered positions.
             g.clearRect(0, 0, canvas.width, canvas.height);

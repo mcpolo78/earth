@@ -79,6 +79,7 @@ const gridAgent = newAgent();      // the grid of weather data
 const rendererAgent = newAgent();  // the globe SVG renderer
 const overlay = buildOverlayRenderer();  // color overlay, rendered in a web worker
 let animator = null;               // the wind particle animator
+let view3d = null;                 // the WebGL globe (src/globe3d.js), created the first time it is shown
 
 /**
  * @returns {Array|undefined} the [x, y] position of the pointer (mouse or first touch) for a d3 event.
@@ -176,6 +177,7 @@ function buildInputController() {
                     globe.projection.rotate(rotate);
                     configuration.save({orientation: globe.orientation()});  // triggers reorientation
                 }
+                if (globe.is3D && view3d) view3d.lookAt(coord);
                 dispatch.trigger("click", globe.projection(coord), coord);
             }, log.error);
         }
@@ -374,7 +376,7 @@ function projectVisible(globe, coord) {
 function startAnimation() {
     stopAnimation(true);
     const globe = globeAgent.value(), grids = gridAgent.value();
-    if (!globe || !grids || !grids.primaryGrid.particles) return;
+    if (!globe || !grids || !grids.primaryGrid.particles || globe.is3D) return;  // the 3D view animates itself
     let particleCount = globe.bounds(view).width * PARTICLE_MULTIPLIER;
     if (µ.isMobile()) {
         particleCount *= PARTICLE_REDUCTION;
@@ -460,7 +462,7 @@ function buildOverlayRenderer() {
         /** Requests a render of the current view at the given resolution (pixels per sample). */
         request(step) {
             const globe = globeAgent.value();
-            if (!globe) return;
+            if (!globe || globe.is3D) return;  // the 3D view colors its own texture
             if (!enabled) {
                 this.clear();
                 drawGridPoints(canvas.getContext("2d"), (gridAgent.value() || {}).overlayGrid, globe);
@@ -626,13 +628,14 @@ let activeLocation = {};
 function showLocationDetails(point, coord) {
     point = point || [];
     coord = coord || [];
-    const grids = gridAgent.value(), λ = coord[0], φ = coord[1];
-    if (!isOnGlobe(globeAgent.value(), point, coord)) {
+    const grids = gridAgent.value(), λ = coord[0], φ = coord[1], globe = globeAgent.value();
+    if (globe && globe.is3D ? !Number.isFinite(λ) || !Number.isFinite(φ) : !isOnGlobe(globe, point, coord)) {
         return;
     }
 
     clearLocationDetails(false);  // clean the slate
     activeLocation = {point, coord};  // remember where the current location is
+    if (view3d) view3d.setMarker(coord);
 
     if (Number.isFinite(λ) && Number.isFinite(φ)) {
         d3.select("#location-coord").text(µ.formatCoordinates(λ, φ));
@@ -671,6 +674,7 @@ function clearLocationDetails(clearEverything) {
     if (clearEverything) {
         activeLocation = {};
         d3.select(".location-mark").remove();
+        if (view3d) view3d.setMarker(null);
     }
 }
 
@@ -804,6 +808,43 @@ function init() {
         }
     });
     globeAgent.on("update", startAnimation);
+
+    // The 3D globe takes over the display when its projection is selected. three.js is only loaded then.
+    let loading3d = null;
+    async function sync3d() {
+        const globe = globeAgent.value(), wanted = !!(globe && globe.is3D);
+        if (!wanted) {
+            if (view3d && view3d.visible) {
+                view3d.hide();
+                d3.select("#display").style("visibility", null);
+            }
+            return;
+        }
+        if (!view3d) {
+            report.status("Loading 3D...");
+            loading3d ??= import("./globe3d.js");
+            const {createGlobe3D} = await loading3d;
+            if (view3d) return sync3d();  // created by a concurrent call
+            const rotate = globe.projection.rotate();
+            view3d = createGlobe3D(document.body, {
+                start: [-rotate[0], -rotate[1]],
+                onClick: coord => showLocationDetails(null, coord)
+            });
+            report.status("");
+            if (!(globeAgent.value() || {}).is3D) return sync3d();  // projection changed while loading
+        }
+        d3.select("#display").style("visibility", "hidden");
+        view3d.setMesh(meshAgent.value());
+        view3d.setOverlayEnabled(configuration.get("overlayType") !== "off");
+        if (gridAgent.value()) view3d.setGrids(gridAgent.value());
+        view3d.show();
+        if (activeLocation.coord) view3d.setMarker(activeLocation.coord);
+    }
+    const sync3dSafe = () => sync3d().catch(report.error);
+    globeAgent.on("update", sync3dSafe);
+    gridAgent.on("update", sync3dSafe);
+    meshAgent.on("update", sync3dSafe);
+    configuration.on("change:overlayType", () => view3d && view3d.visible && sync3dSafe());
     rendererAgent.on("start", () => animator && animator.setMoving(true));
     rendererAgent.on("render", function() {
         report.status("");
