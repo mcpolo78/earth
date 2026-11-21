@@ -1,0 +1,20 @@
+# Redéploie le site sur Vercel une fois par jour pour récupérer le dernier run GFS
+# (les données sont téléchargées pendant le build Vercel, voir vercel.json).
+# Nécessite le secret VERCEL_DEPLOY_HOOK (URL d'un Deploy Hook Vercel) ; sans lui, le job ne fait rien.
+name: Rafraîchir les données météo
+
+on:
+  schedule:
+    - cron: "30 4 * * *"   # 04:30 UTC, environ 4 h 30 après le run GFS de 00 UTC
+  workflow_dispatch:
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déclencher le Deploy Hook Vercel
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "Secret VERCEL_DEPLOY_HOOK absent, rien à faire."; exit 0; fi
+          curl -fsS -X POST "$HOOK" > /dev/null && echo "Redéploiement demandé."
