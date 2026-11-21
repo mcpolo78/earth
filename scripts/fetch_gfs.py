@@ -243,8 +243,10 @@ def fetch_waves(run, fhour):
         return thin(header, values, WAVE_STRIDE)
 
     h_header, height = field("HTSGW:surface")
+    h_header = dict(h_header, center=None, centerName="GFS-Wave / NCEP / US National Weather Service")
     _, direction = field("DIRPW:surface")
     p_header, period = field("PERPW:surface")
+    p_header = dict(p_header, center=None, centerName=h_header["centerName"])
     # DIRPW is the direction the waves come FROM, clockwise from north; they travel the opposite way.
     to = np.radians(direction + 180.0)
     u, v = height * np.sin(to), height * np.cos(to)
@@ -254,6 +256,69 @@ def fetch_waves(run, fhour):
         ("waves", "surface", "level"): [as_record(u_header, u, 2), as_record(v_header, v, 2)],
         ("wave_period", "surface", "level"): [as_record(p_header, period, 1)],
     }
+
+
+GEFS_BUCKET = "https://noaa-gefs-pds.s3.amazonaws.com"
+
+# GEFS-Aerosols (NOAA's global aerosol forecast, the keyless counterpart of CAMS). Its .idx lists several aerosol
+# types under one variable name, so each layer is matched on the variable and on text from the rest of the line.
+AEROSOL_LAYERS = [
+    # (layer type, variable:level, required text, scale factor, decimals)
+    ("pm2_5", "PMTF:surface", "aerosol=Total aerosol:aerosol_size <2.5e-06", 1, 1),  # already µg/m³
+    ("pm10", "PMTC:surface", "aerosol=Total aerosol:aerosol_size <1e-05", 1, 1),
+    ("aerosol_optical_depth", "AOTK:entire atmosphere", "aerosol=Total aerosol:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07", 1, 3),
+    ("dust_optical_depth", "AOTK:entire atmosphere", "aerosol=Dust dry:aerosol_size <2e-05:aerosol_wavelength >=5.45e-07,<=5.65e-07", 1, 3),
+]
+AEROSOL_UNITS = {"pm2_5": "µg m-3", "pm10": "µg m-3", "aerosol_optical_depth": "1", "dust_optical_depth": "1"}
+
+
+def aerosol_url(run, fhour):
+    return f"{GEFS_BUCKET}/gefs.{run:%Y%m%d}/{run:%H}/chem/pgrb2ap25/gefs.chem.t{run:%H}z.a2d_0p25.f{fhour:03d}.grib2"
+
+
+def latest_aerosol_run(last_valid_time):
+    """Finds the most recent GEFS-Aerosols run that already covers last_valid_time."""
+    run = last_valid_time.replace(hour=last_valid_time.hour - last_valid_time.hour % 6)
+    for _ in range(12):
+        fhour = int((last_valid_time - run).total_seconds() // 3600)
+        if fhour >= 0 and fhour % 3 == 0 and exists(aerosol_url(run, fhour) + ".idx"):
+            return run
+        run -= dt.timedelta(hours=6)
+    return None
+
+
+def parse_full_idx(text):
+    """Returns [(line, start, end)] from an .idx inventory, keeping every line (variables can repeat)."""
+    lines = text.strip().splitlines()
+    starts = [int(l.split(":")[1]) for l in lines]
+    return [(l, starts[i], starts[i + 1] - 1 if i + 1 < len(lines) else None) for i, l in enumerate(lines)]
+
+
+def fetch_aerosols(run, valid_time):
+    """Fetches surface PM2.5 and PM10 (µg/m³) and the total and dust aerosol optical depths at 550 nm."""
+    fhour = int((valid_time - run).total_seconds() // 3600)
+    url = aerosol_url(run, fhour)
+    try:
+        inventory = parse_full_idx(http_get(url + ".idx").decode())
+    except Exception:
+        print(f"  {valid_time:%d %H}Z: no aerosol data, skipped")
+        return {}
+    wanted = {}
+    for layer_type, var, text, factor, decimals in AEROSOL_LAYERS:
+        for line, start, end in inventory:
+            if f":{var}:" in line and text in line:
+                wanted[layer_type] = (start, end, factor, decimals)
+                break
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        decoded = dict(zip(wanted, pool.map(lambda k: decode(http_get(url, wanted[k][:2])), wanted)))
+    layers = {}
+    for layer_type, (_, _, factor, decimals) in wanted.items():
+        header, values = decoded[layer_type]
+        header, values = thin(header, values * factor, WAVE_STRIDE)
+        header = dict(header, parameterName=layer_type, parameterUnit=AEROSOL_UNITS[layer_type], center=None,
+                      centerName="GEFS-Aerosols / NCEP / US National Weather Service")
+        layers[(layer_type, None, None)] = [as_record(header, values, decimals)]
+    return layers
 
 
 def write_layers(layers, valid_time, resolution="1.0"):
@@ -308,6 +373,7 @@ def main():
     parser.add_argument("--hours", default="0-24:3",
                         help='forecast hours, e.g. "0", "0,6,12" or "0-48:3" (default: 0-24:3)')
     parser.add_argument("--keep-days", type=int, default=3, help="delete data older than this many days (default: 3)")
+    parser.add_argument("--no-aerosols", action="store_true", help="skip the GEFS-Aerosols air quality layers")
     parser.add_argument("--no-waves", action="store_true", help="skip the GFS-Wave ocean layers")
     parser.add_argument("--no-current", action="store_true", help='do not update the "current" layers')
     args = parser.parse_args()
@@ -317,6 +383,12 @@ def main():
     print(f"GFS run {run:%Y-%m-%d %H}Z, forecast hours {fhours}")
 
     specs = layer_specs()
+    last_valid = run + dt.timedelta(hours=max(fhours))
+    aerosol_run = None if args.no_aerosols else latest_aerosol_run(last_valid)
+    if aerosol_run:
+        print(f"GEFS-Aerosols run {aerosol_run:%Y-%m-%d %H}Z")
+    elif not args.no_aerosols:
+        print("No GEFS-Aerosols run covers these hours: air quality skipped")
     now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     closest = None
     for fhour in fhours:
@@ -325,6 +397,8 @@ def main():
         files = write_layers(layers, valid_time)
         if not args.no_waves:
             files += write_layers(fetch_waves(run, fhour), valid_time, "0.5")
+        if aerosol_run:
+            files += write_layers(fetch_aerosols(aerosol_run, valid_time), valid_time, "0.5")
         print(f"  f{fhour:03d} -> {valid_time:%Y-%m-%d %H}Z: {len(files)} layers")
         if closest is None or abs(valid_time - now) < abs(closest[0] - now):
             closest = (valid_time, files)

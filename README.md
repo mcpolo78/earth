@@ -39,6 +39,10 @@ direction et période du pic. En mode Ocean, les particules suivent la direction
 plus vite quand elles sont plus hautes. `--no-waves` désactive ce téléchargement. Les courants (OSCAR) restent
 l'échantillon de 2014 fourni avec le projet d'origine.
 
+La qualité de l'air vient de GEFS-Aerosols (NOAA, bucket public `noaa-gefs-pds`, sans clé d'API, contrairement à
+CAMS) : PM2,5 et PM10 au sol, épaisseur optique des aérosols et des poussières à 550 nm. Grille ramenée à 0,5°,
+mêmes échéances que le GFS. `--no-aerosols` désactive ce téléchargement.
+
 Ce qui a changé par rapport à l'original
 ----------------------------------------
 
@@ -52,6 +56,9 @@ Ce qui a changé par rapport à l'original
 * Le calque de couleurs est calculé dans un Web Worker (`src/overlay-worker.js`) : grossier pendant le mouvement,
   fin à l'arrêt, sans bloquer l'animation.
 * Tests QUnit remplacés par Vitest (`test/`).
+* Globe 3D (bouton « 3D » dans Projection) : WebGL avec three.js, chargé seulement quand on l'utilise. Les données,
+  les côtes et les particules sont dessinées dans des textures équirectangulaires plaquées sur une sphère, avec une
+  atmosphère lumineuse. Glisser pour tourner, molette pour zoomer, clic pour lire les valeurs d'un point.
 
 ---
 
