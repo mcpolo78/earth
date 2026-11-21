@@ -37,10 +37,19 @@ function buildProduct(overrides) {
     }, overrides);
 }
 
-function gfs1p0degPath(attr, type, surface, level) {
+function gfsPath(attr, type, surface, level, resolution) {
     const dir = attr.date, stamp = dir === "current" ? "current" : attr.hour;
-    const file = [stamp, type, surface, level, "gfs", "1.0"].filter(µ.isValue).join("-") + ".bin";
+    const file = [stamp, type, surface, level, "gfs", resolution].filter(µ.isValue).join("-") + ".bin";
     return [WEATHER_PATH, dir, file].join("/");
+}
+
+function gfs1p0degPath(attr, type, surface, level) {
+    return gfsPath(attr, type, surface, level, "1.0");
+}
+
+/** GFS-Wave layers, thinned to 0.5° by scripts/fetch_gfs.py. */
+function gfsWave0p5degPath(attr, type) {
+    return gfsPath(attr, type, "surface", "level", "0.5");
 }
 
 function gfsDate(attr) {
@@ -569,6 +578,83 @@ const FACTORIES = {
                     ])
                 },
                 particles: {velocityScale: 1 / 4400, maxIntensity: 0.7}
+            });
+        }
+    },
+
+    "waves": {
+        matches: matches({param: "ocean", level: "waves"}),
+        create(attr) {
+            return buildProduct({
+                field: "vector",
+                type: "waves",
+                description: localize({
+                    name: {en: "Wave Height", ja: "有義波高", fr: "Hauteur des vagues"},
+                    qualifier: {en: " (dominant direction)", ja: "（卓越波向）", fr: " (direction dominante)"}
+                }),
+                paths: [gfsWave0p5degPath(attr, "waves")],
+                date: gfsDate(attr),
+                builder(file) {
+                    const uData = file[0].data, vData = file[1].data;
+                    return {
+                        header: file[0].header,
+                        interpolate: bilinearInterpolateVector,
+                        data(i) {
+                            const u = uData[i], v = vData[i];
+                            return Number.isNaN(u) || Number.isNaN(v) ? null : [u, v];
+                        }
+                    };
+                },
+                units: [
+                    {label: "m",  conversion: x => x,            precision: 1},
+                    {label: "ft", conversion: x => x * 3.280839, precision: 1}
+                ],
+                scale: {
+                    bounds: [0, 12],
+                    gradient: µ.segmentedColorScale([
+                        [0,   [8, 24, 60]],
+                        [0.5, [20, 60, 140]],
+                        [1.5, [30, 130, 200]],
+                        [2.5, [40, 200, 170]],
+                        [4,   [210, 230, 80]],
+                        [6,   [250, 150, 40]],
+                        [8,   [230, 50, 50]],
+                        [12,  [200, 40, 200]]
+                    ])
+                },
+                // Particles show where the dominant waves are heading, faster where they are higher.
+                particles: {velocityScale: 1 / 9000, maxIntensity: 6}
+            });
+        }
+    },
+
+    "wave_period": {
+        matches: matches({param: "ocean", level: "waves", overlayType: "wave_period"}),
+        create(attr) {
+            return buildProduct({
+                field: "scalar",
+                type: "wave_period",
+                description: localize({
+                    name: {en: "Wave Period", ja: "ピーク周期", fr: "Période des vagues"},
+                    qualifier: ""
+                }),
+                paths: [gfsWave0p5degPath(attr, "wave_period")],
+                date: gfsDate(attr),
+                builder: scalarBuilder(),
+                units: [
+                    {label: "s", conversion: x => x, precision: 1}
+                ],
+                scale: {
+                    bounds: [0, 20],
+                    gradient: µ.segmentedColorScale([
+                        [0,  [20, 20, 50]],
+                        [4,  [40, 70, 150]],
+                        [8,  [40, 160, 190]],
+                        [12, [120, 210, 120]],
+                        [16, [240, 200, 60]],
+                        [20, [240, 80, 120]]
+                    ])
+                }
             });
         }
     },

@@ -104,9 +104,15 @@
                 class="text-button" id="overlay-total_cloud_cover" title="Total Cloud Cover">Clouds</span>
             </p>
             <p class="ocean-mode invisible">Animate | <span
-                class="text-button" id="animate-currents" title="Currents">Currents</span>
+                class="text-button" id="animate-waves" title="Waves (GFS-Wave)">Waves</span> – <span
+                class="text-button" id="animate-currents" title="Currents (2014 sample)">Currents</span>
             </p>
-            <p class="ocean-mode invisible">Overlay | <span
+            <p class="ocean-mode invisible" data-level="waves">Overlay | <span
+                class="text-button" id="overlay-waves-off">None</span> – <span
+                class="text-button" id="overlay-wave_height" title="Significant Wave Height">Height</span> – <span
+                class="text-button" id="overlay-wave_period" title="Peak Wave Period">Period</span>
+            </p>
+            <p class="ocean-mode invisible" data-level="currents">Overlay | <span
                 class="text-button" id="overlay-ocean-off">None</span> – <span
                 class="text-button" id="overlay-currents" title="Currents">Currents</span>
             </p>
