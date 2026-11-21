@@ -43,6 +43,15 @@ La qualité de l'air vient de GEFS-Aerosols (NOAA, bucket public `noaa-gefs-pds`
 CAMS) : PM2,5 et PM10 au sol, épaisseur optique des aérosols et des poussières à 550 nm. Grille ramenée à 0,5°,
 mêmes échéances que le GFS. `--no-aerosols` désactive ce téléchargement.
 
+Déploiement (Vercel)
+--------------------
+
+`vercel.json` installe Python et ecCodes dans un venv pendant le build, lance `scripts/fetch_gfs.py`
+(environ 30 secondes), puis `vite build` : chaque déploiement embarque les dernières données GFS, houle et
+qualité de l'air. Pour les garder à jour, `.github/workflows/refresh-data.yml` appelle un Deploy Hook Vercel
+toutes les 6 heures : créer le hook dans Vercel (Settings → Git → Deploy Hooks, branche `main`) et coller son
+URL dans le secret GitHub `VERCEL_DEPLOY_HOOK`.
+
 Ce qui a changé par rapport à l'original
 ----------------------------------------
 

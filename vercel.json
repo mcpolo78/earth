@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npm ci && python3 -m venv /tmp/gfs-venv && /tmp/gfs-venv/bin/pip install -q -r scripts/requirements.txt",
+  "buildCommand": "/tmp/gfs-venv/bin/python scripts/fetch_gfs.py && npm run build",
+  "outputDirectory": "dist",
+  "headers": [
+    {
+      "source": "/data/weather/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    }
+  ]
+}
