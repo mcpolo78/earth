@@ -43,4 +43,12 @@ describe("products", () => {
         expect(temp.paths).toEqual(["/data/weather/2026/11/20/2100-temp-isobaric-850hPa-gfs-1.0.bin"]);
         expect(overlayTypes.has("mean_sea_level_pressure")).toBe(true);
     });
+    it("knows the new GFS layers", () => {
+        for (const type of ["precipitation_rate", "snow_depth", "cape", "total_cloud_cover"]) {
+            const [, product] = productsFor({date: "current", hour: "", param: "wind", surface: "surface",
+                level: "level", overlayType: type});
+            expect(product.paths).toEqual([`/data/weather/current/current-${type}-gfs-1.0.bin`]);
+            expect(product.scale.gradient(product.scale.bounds[1], 255)).toHaveLength(4);
+        }
+    });
 });

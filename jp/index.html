@@ -56,6 +56,11 @@
             <p>データ | <span id="data-layer"></span></p>
             <p><span id="scale-label">スケール | </span><canvas id="scale"></canvas></p>
             <p>発信源 | <span id="data-center"></span></p>
+            <p id="time-row">時間 | <span
+                class="text-button" id="time-play" title="再生">▶</span><input
+                type="range" id="time-slider" min="0" max="0" value="0" step="1" aria-label="予報時間"/><span
+                id="time-label"></span>
+            </p>
             <p>操作 | <span
                 class="text-button" id="nav-now" title="現在状況">最新</span><span
                 class="text-button" id="nav-backward-more"> « </span> – <span
@@ -91,6 +96,12 @@
                 class="text-button" id="overlay-total_precipitable_water" title="可降水量">可降水量</span> – <span
                 class="text-button" id="overlay-total_cloud_water" title="雲水量">雲水量</span> – <span
                 class="text-button" id="overlay-mean_sea_level_pressure" title="海面更正気圧">海面更正</span>
+            </p>
+            <p class="wind-mode"><span style="visibility:hidden">レイヤー</span> | <span
+                class="text-button" id="overlay-precipitation_rate" title="降水強度">降水</span> – <span
+                class="text-button" id="overlay-snow_depth" title="積雪深">積雪</span> – <span
+                class="text-button" id="overlay-cape" title="対流有効位置エネルギー">CAPE</span> – <span
+                class="text-button" id="overlay-total_cloud_cover" title="全雲量">雲量</span>
             </p>
             <p class="ocean-mode invisible">動画 | <span
                 class="text-button" id="animate-currents" title="海流">海流</span>

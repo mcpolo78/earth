@@ -24,7 +24,8 @@ const HISTORY_INTERVAL = 3;        // base frames between two remembered positio
  * @param grid the primary (vector) grid: interpolate(λ, φ) -> [u, v, magnitude] or null
  * @param options {particleCount, getView}
  */
-export function createAnimator(canvas, globe, grid, options) {
+export function createAnimator(canvas, globe, initialGrid, options) {
+    let grid = initialGrid;
     const g = canvas.getContext("2d");
     const projection = globe.projection;
     const colorStyles = µ.windIntensityColorScale(INTENSITY_SCALE_STEP, grid.particles.maxIntensity);
@@ -204,6 +205,10 @@ export function createAnimator(canvas, globe, grid, options) {
         /** While moving, trails are redrawn every frame from remembered positions. */
         setMoving(value) {
             moving = value;
+        },
+        /** Swaps in a new grid of the same kind (e.g. the next forecast hour) without restarting particles. */
+        setGrid(newGrid) {
+            grid = newGrid;
         },
         stop(clearCanvas) {
             running = false;

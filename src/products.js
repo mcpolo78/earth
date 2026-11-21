@@ -398,6 +398,132 @@ const FACTORIES = {
         }
     },
 
+    "precipitation_rate": {
+        matches: matches({param: "wind", overlayType: "precipitation_rate"}),
+        create(attr) {
+            return buildProduct({
+                field: "scalar",
+                type: "precipitation_rate",
+                description: localize({
+                    name: {en: "Precipitation Rate", ja: "降水強度", fr: "Précipitations"},
+                    qualifier: ""
+                }),
+                paths: [gfs1p0degPath(attr, "precipitation_rate")],
+                date: gfsDate(attr),
+                builder: scalarBuilder(),
+                units: [
+                    {label: "mm/h", conversion: x => x * 3600, precision: 1},
+                    {label: "in/h", conversion: x => x * 3600 / 25.4, precision: 2}
+                ],
+                scale: {
+                    // kg/m²/s; 1 mm/h = 1/3600 kg/m²/s
+                    bounds: [0, 15 / 3600],
+                    gradient: µ.segmentedColorScale([
+                        [0,          [17, 17, 40]],
+                        [0.1 / 3600, [17, 17, 40]],
+                        [0.5 / 3600, [32, 96, 170]],
+                        [2 / 3600,   [40, 180, 120]],
+                        [5 / 3600,   [240, 220, 40]],
+                        [10 / 3600,  [240, 90, 30]],
+                        [15 / 3600,  [220, 30, 200]]
+                    ])
+                }
+            });
+        }
+    },
+
+    "snow_depth": {
+        matches: matches({param: "wind", overlayType: "snow_depth"}),
+        create(attr) {
+            return buildProduct({
+                field: "scalar",
+                type: "snow_depth",
+                description: localize({
+                    name: {en: "Snow Depth", ja: "積雪深", fr: "Épaisseur de neige"},
+                    qualifier: ""
+                }),
+                paths: [gfs1p0degPath(attr, "snow_depth")],
+                date: gfsDate(attr),
+                builder: scalarBuilder(),
+                units: [
+                    {label: "cm", conversion: x => x * 100, precision: 0},
+                    {label: "in", conversion: x => x * 39.3701, precision: 1}
+                ],
+                scale: {
+                    bounds: [0, 2],
+                    gradient: µ.segmentedColorScale([
+                        [0,    [20, 20, 30]],
+                        [0.01, [70, 90, 140]],
+                        [0.1,  [120, 160, 220]],
+                        [0.5,  [200, 220, 250]],
+                        [2,    [255, 255, 255]]
+                    ])
+                }
+            });
+        }
+    },
+
+    "cape": {
+        matches: matches({param: "wind", overlayType: "cape"}),
+        create(attr) {
+            return buildProduct({
+                field: "scalar",
+                type: "cape",
+                description: localize({
+                    name: {en: "CAPE (thunderstorm potential)", ja: "対流有効位置エネルギー", fr: "CAPE (potentiel orageux)"},
+                    qualifier: ""
+                }),
+                paths: [gfs1p0degPath(attr, "cape")],
+                date: gfsDate(attr),
+                builder: scalarBuilder(),
+                units: [
+                    {label: "J/kg", conversion: x => x, precision: 0}
+                ],
+                scale: {
+                    bounds: [0, 4000],
+                    gradient: µ.segmentedColorScale([
+                        [0,    [10, 10, 40]],
+                        [100,  [30, 60, 120]],
+                        [500,  [40, 160, 90]],
+                        [1000, [230, 220, 50]],
+                        [2000, [240, 120, 30]],
+                        [3000, [220, 30, 40]],
+                        [4000, [240, 40, 240]]
+                    ])
+                }
+            });
+        }
+    },
+
+    "total_cloud_cover": {
+        matches: matches({param: "wind", overlayType: "total_cloud_cover"}),
+        create(attr) {
+            return buildProduct({
+                field: "scalar",
+                type: "total_cloud_cover",
+                description: localize({
+                    name: {en: "Total Cloud Cover", ja: "全雲量", fr: "Couverture nuageuse"},
+                    qualifier: ""
+                }),
+                paths: [gfs1p0degPath(attr, "total_cloud_cover")],
+                date: gfsDate(attr),
+                builder: scalarBuilder(),
+                units: [
+                    {label: "%", conversion: x => x, precision: 0}
+                ],
+                scale: {
+                    bounds: [0, 100],
+                    gradient: µ.segmentedColorScale([
+                        [0,   [8, 20, 60]],
+                        [30,  [60, 80, 120]],
+                        [70,  [170, 180, 200]],
+                        [100, [255, 255, 255]]
+                    ])
+                }
+            });
+        }
+    },
+
     "currents": {
         matches: matches({param: "ocean", surface: "surface", level: "currents"}),
         async create(attr) {
