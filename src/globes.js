@@ -316,6 +316,14 @@ function winkel3() {
     });
 }
 
+/**
+ * The 3D globe is drawn by src/globe3d.js with WebGL. For the rest of the app it behaves like the orthographic
+ * globe (which keeps running hidden underneath), flagged so earth.js hands the display over to the 3D view.
+ */
+function globe3d(view) {
+    return Object.assign(orthographic(view), {is3D: true});
+}
+
 export const globes = new Map([
     ["atlantis", atlantis],
     ["azimuthal_equidistant", azimuthalEquidistant],
@@ -324,5 +332,6 @@ export const globes = new Map([
     ["orthographic", orthographic],
     ["stereographic", stereographic],
     ["waterman", waterman],
-    ["winkel3", winkel3]
+    ["winkel3", winkel3],
+    ["globe3d", globe3d]
 ]);
