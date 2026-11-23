@@ -245,9 +245,9 @@ export function segmentedColorScale(segments) {
 }
 
 /** Returns a human readable string for the provided coordinates. */
-export function formatCoordinates(λ, φ) {
+export function formatCoordinates(λ, φ, west = "W") {
     return Math.abs(φ).toFixed(2) + "° " + (φ >= 0 ? "N" : "S") + ", " +
-        Math.abs(λ).toFixed(2) + "° " + (λ >= 0 ? "E" : "W");
+        Math.abs(λ).toFixed(2) + "° " + (λ >= 0 ? "E" : west);
 }
 
 /** Returns a human readable string for the provided scalar in the given units. */

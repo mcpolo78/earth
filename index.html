@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" itemscope itemtype="http://schema.org/Map" prefix="og: http://ogp.me/ns# fb: http://ogp.me/ns/fb#">
+<html lang="fr" itemscope itemtype="http://schema.org/Map" prefix="og: http://ogp.me/ns# fb: http://ogp.me/ns/fb#">
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>earth :: an animated map of global wind and weather</title>
+    <title>earth :: carte animée des vents et de la météo mondiale</title>
     <meta itemprop="name"                                      content="earth"/>
     <meta itemprop="description"     name="description"        content="an animated map of global wind and weather"/>
     <meta itemprop="author"          name="author"             content="Cameron Beccario"/>
@@ -17,7 +17,7 @@
     <link rel="apple-touch-icon" sizes="152x152" href="/ipad-icon.png"/>
     <link rel="stylesheet" type="text/css" href="/styles/styles.css"/>
 </head>
-<body data-lang="en">
+<body>
 
     <div id="display">
         <svg id="map" class="fill-screen" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
@@ -31,7 +31,7 @@
         <div id="location">
             <p>
                 <span id="location-coord"></span>
-                <span id="location-close" class="invisible text-button"> ✕ </span>
+                <span id="location-close" class="invisible text-button" data-i18n-title="location.close.title"> ✕ </span>
             </p>
             <p>
                 <span id="location-wind"></span>
@@ -44,38 +44,38 @@
         </div>
 
         <p id="earth">
-            <span id="show-menu" class="text-button" title="menu">earth</span>
+            <span id="show-menu" class="text-button" data-i18n-title="menu.title">earth</span>
             <span id="progress" class="invisible"></span>
         </p>
 
         <div id="menu" class="invisible">
-            <p>Date | <span
+            <p><span data-i18n="label.date">Date</span> | <span
                 id="data-date" class="local"></span> <span
                 id="toggle-zone" class="text-button"></span>
             </p>
-            <p>Data | <span id="data-layer"></span></p>
-            <p><span id="scale-label">Scale | </span><canvas id="scale"></canvas></p>
-            <p>Source | <span id="data-center"></span></p>
-            <p id="time-row">Time | <span
-                class="text-button" id="time-play" title="Play forecast">▶</span><input
-                type="range" id="time-slider" min="0" max="0" value="0" step="1" aria-label="Forecast time"/><span
+            <p><span data-i18n="label.data">Données</span> | <span id="data-layer"></span></p>
+            <p><span id="scale-label"><span data-i18n="label.scale">Échelle</span> | </span><canvas id="scale"></canvas></p>
+            <p><span data-i18n="label.source">Source</span> | <span id="data-center"></span></p>
+            <p id="time-row"><span data-i18n="label.time">Prévision</span> | <span
+                class="text-button" id="time-play" data-i18n-title="time.play.title">▶</span><input
+                type="range" id="time-slider" min="0" max="0" value="0" step="1" data-i18n-aria="time.slider"/><span
                 id="time-label"></span>
             </p>
-            <p>Control | <span
-                class="text-button" id="nav-now" title="Current Conditions">Now</span><span
-                class="text-button" id="nav-backward-more"> « </span> – <span
-                class="text-button" id="nav-backward"> ‹ </span> – <span
-                class="text-button" id="nav-forward"> › </span> – <span
-                class="text-button" id="nav-forward-more"> » </span><span
-                class="text-button" id="show-location" title="Current Position">〖◯〗</span><span
-                class="text-button" id="option-show-grid" title="Toggle Grid">Grid</span>
+            <p><span data-i18n="label.control">Navigation</span> | <span
+                class="text-button" id="nav-now" data-i18n="nav.now" data-i18n-title="nav.now.title">Maintenant</span><span
+                class="text-button" id="nav-backward-more" data-i18n-title="nav.backwardMore.title"> « </span> – <span
+                class="text-button" id="nav-backward" data-i18n-title="nav.backward.title"> ‹ </span> – <span
+                class="text-button" id="nav-forward" data-i18n-title="nav.forward.title"> › </span> – <span
+                class="text-button" id="nav-forward-more" data-i18n-title="nav.forwardMore.title"> » </span><span
+                class="text-button" id="show-location" data-i18n-title="nav.location.title">〖◯〗</span><span
+                class="text-button" id="option-show-grid" data-i18n="nav.grid" data-i18n-title="nav.grid.title">Grille</span>
             </p>
-            <p>Mode | <span
-                class="text-button" id="wind-mode-enable">Air</span> – <span
-                class="text-button" id="ocean-mode-enable">Ocean</span>
+            <p><span data-i18n="label.mode">Mode</span> | <span
+                class="text-button" id="wind-mode-enable" data-i18n="mode.air">Air</span> – <span
+                class="text-button" id="ocean-mode-enable" data-i18n="mode.ocean">Océan</span>
             </p>
-            <p class="wind-mode">Height | <span
-                class="surface text-button" id="surface-level" title="Surface">Sfc</span> – <span
+            <p class="wind-mode"><span data-i18n="label.height">Altitude</span> | <span
+                class="surface text-button" id="surface-level" data-i18n="height.surface" data-i18n-title="height.surface.title">Sol</span> – <span
                 class="surface text-button" id="isobaric-1000hPa">1000</span> – <span
                 class="surface text-button" id="isobaric-850hPa">850</span> – <span
                 class="surface text-button" id="isobaric-700hPa">700</span> – <span
@@ -84,60 +84,62 @@
                 class="surface text-button" id="isobaric-70hPa">70</span> – <span
                 class="surface text-button" id="isobaric-10hPa">10</span> hPa
             </p>
-            <p class="wind-mode">Overlay | <span
-                class="text-button" id="overlay-off">None</span> – <span
-                class="text-button" id="overlay-wind" title="Wind Speed">Wind</span> – <span
-                class="text-button" id="overlay-temp" title="Temperature">Temp</span> – <span
-                class="text-button" id="overlay-relative_humidity" title="Relative Humidity">RH</span> – <span
-                class="text-button" id="overlay-air_density" title="Air Density">AD</span> – <span
-                class="text-button" id="overlay-wind_power_density" title="Wind Power Density">WPD</span>
+            <p class="wind-mode"><span data-i18n="label.overlay">Calque</span> | <span
+                class="text-button" id="overlay-off" data-i18n="overlay.none">Aucun</span> – <span
+                class="text-button" id="overlay-wind" data-i18n="overlay.wind" data-i18n-title="overlay.wind.title"></span> – <span
+                class="text-button" id="overlay-temp" data-i18n="overlay.temp" data-i18n-title="overlay.temp.title"></span> – <span
+                class="text-button" id="overlay-relative_humidity" data-i18n="overlay.rh" data-i18n-title="overlay.rh.title"></span> – <span
+                class="text-button" id="overlay-air_density" data-i18n="overlay.ad" data-i18n-title="overlay.ad.title"></span> – <span
+                class="text-button" id="overlay-wind_power_density" data-i18n="overlay.wpd" data-i18n-title="overlay.wpd.title"></span>
             </p>
-            <p class="wind-mode"><span style="visibility:hidden">Overlay</span> | <span
-                class="text-button" id="overlay-total_precipitable_water" title="Total Precipitable Water">TPW</span> – <span
-                class="text-button" id="overlay-total_cloud_water" title="Total Cloud Water">TCW</span> – <span
-                class="text-button" id="overlay-mean_sea_level_pressure" title="Mean Sea Level Pressure">MSLP</span>
+            <p class="wind-mode"><span style="visibility:hidden" data-i18n="label.overlay">Calque</span> | <span
+                class="text-button" id="overlay-total_precipitable_water" data-i18n="overlay.tpw" data-i18n-title="overlay.tpw.title"></span> – <span
+                class="text-button" id="overlay-total_cloud_water" data-i18n="overlay.tcw" data-i18n-title="overlay.tcw.title"></span> – <span
+                class="text-button" id="overlay-mean_sea_level_pressure" data-i18n="overlay.mslp" data-i18n-title="overlay.mslp.title"></span>
             </p>
-            <p class="wind-mode"><span style="visibility:hidden">Overlay</span> | <span
-                class="text-button" id="overlay-precipitation_rate" title="Precipitation Rate">Rain</span> – <span
-                class="text-button" id="overlay-snow_depth" title="Snow Depth">Snow</span> – <span
-                class="text-button" id="overlay-cape" title="CAPE (thunderstorm potential)">CAPE</span> – <span
-                class="text-button" id="overlay-total_cloud_cover" title="Total Cloud Cover">Clouds</span>
+            <p class="wind-mode"><span style="visibility:hidden" data-i18n="label.overlay">Calque</span> | <span
+                class="text-button" id="overlay-precipitation_rate" data-i18n="overlay.rain" data-i18n-title="overlay.rain.title"></span> – <span
+                class="text-button" id="overlay-snow_depth" data-i18n="overlay.snow" data-i18n-title="overlay.snow.title"></span> – <span
+                class="text-button" id="overlay-cape" data-i18n="overlay.cape" data-i18n-title="overlay.cape.title"></span> – <span
+                class="text-button" id="overlay-total_cloud_cover" data-i18n="overlay.clouds" data-i18n-title="overlay.clouds.title"></span>
             </p>
-            <p class="wind-mode"><span style="visibility:hidden">Overlay</span> | <span
-                class="text-button" id="overlay-pm2_5" title="Fine Particulate Matter (PM2.5)">PM2.5</span> – <span
-                class="text-button" id="overlay-pm10" title="Particulate Matter (PM10)">PM10</span> – <span
-                class="text-button" id="overlay-aerosol_optical_depth" title="Aerosol Optical Depth">AOD</span> – <span
-                class="text-button" id="overlay-dust_optical_depth" title="Dust Optical Depth">Dust</span>
+            <p class="wind-mode"><span style="visibility:hidden" data-i18n="label.overlay">Calque</span> | <span
+                class="text-button" id="overlay-pm2_5" data-i18n="overlay.pm25" data-i18n-title="overlay.pm25.title"></span> – <span
+                class="text-button" id="overlay-pm10" data-i18n="overlay.pm10" data-i18n-title="overlay.pm10.title"></span> – <span
+                class="text-button" id="overlay-aerosol_optical_depth" data-i18n="overlay.aod" data-i18n-title="overlay.aod.title"></span> – <span
+                class="text-button" id="overlay-dust_optical_depth" data-i18n="overlay.dust" data-i18n-title="overlay.dust.title"></span>
             </p>
-            <p class="ocean-mode invisible">Animate | <span
-                class="text-button" id="animate-waves" title="Waves (GFS-Wave)">Waves</span> – <span
-                class="text-button" id="animate-currents" title="Currents (2014 sample)">Currents</span>
+            <p class="ocean-mode invisible"><span data-i18n="label.animate">Animation</span> | <span
+                class="text-button" id="animate-waves" data-i18n="animate.waves" data-i18n-title="animate.waves.title">Vagues</span> – <span
+                class="text-button" id="animate-currents" data-i18n="animate.currents" data-i18n-title="animate.currents.title">Courants</span>
             </p>
-            <p class="ocean-mode invisible" data-level="waves">Overlay | <span
-                class="text-button" id="overlay-waves-off">None</span> – <span
-                class="text-button" id="overlay-wave_height" title="Significant Wave Height">Height</span> – <span
-                class="text-button" id="overlay-wave_period" title="Peak Wave Period">Period</span>
+            <p class="ocean-mode invisible" data-level="waves"><span data-i18n="label.overlay">Calque</span> | <span
+                class="text-button" id="overlay-waves-off" data-i18n="overlay.none">Aucun</span> – <span
+                class="text-button" id="overlay-wave_height" data-i18n="overlay.waveHeight" data-i18n-title="overlay.waveHeight.title">Hauteur</span> – <span
+                class="text-button" id="overlay-wave_period" data-i18n="overlay.wavePeriod" data-i18n-title="overlay.wavePeriod.title">Période</span>
             </p>
-            <p class="ocean-mode invisible" data-level="currents">Overlay | <span
-                class="text-button" id="overlay-ocean-off">None</span> – <span
-                class="text-button" id="overlay-currents" title="Currents">Currents</span>
+            <p class="ocean-mode invisible" data-level="currents"><span data-i18n="label.overlay">Calque</span> | <span
+                class="text-button" id="overlay-ocean-off" data-i18n="overlay.none">Aucun</span> – <span
+                class="text-button" id="overlay-currents" data-i18n="overlay.currents" data-i18n-title="overlay.currents.title">Courants</span>
             </p>
-            <p class="ocean-mode invisible"><span style="visibility:hidden">Overlay</span> |</p>
-            <p>Projection | <span
-                class="proj text-button" id="atlantis" title="Atlantis">A</span> – <span
-                class="proj text-button" id="azimuthal_equidistant" title="Azimuthal Equidistant">AE</span> – <span
-                class="proj text-button" id="conic_equidistant" title="Conic Equidistant">CE</span> – <span
-                class="proj text-button" id="equirectangular" title="Equirectangular">E</span> – <span
-                class="proj text-button" id="orthographic" title="Orthographic">O</span> – <span
-                class="proj text-button" id="stereographic" title="Stereographic">S</span> – <span
-                class="proj text-button" id="waterman" title="Waterman Butterfly">WB</span> – <span
-                class="proj text-button" id="winkel3" title="Winkel Tripel">W3</span> – <span
-                class="proj text-button" id="globe3d" title="3D Globe (WebGL)">3D</span>
+            <p class="ocean-mode invisible"><span style="visibility:hidden" data-i18n="label.overlay">Calque</span> |</p>
+            <p><span data-i18n="label.projection">Projection</span> | <span
+                class="proj text-button" id="atlantis" data-i18n-title="proj.atlantis">A</span> – <span
+                class="proj text-button" id="azimuthal_equidistant" data-i18n-title="proj.azimuthal_equidistant">AE</span> – <span
+                class="proj text-button" id="conic_equidistant" data-i18n-title="proj.conic_equidistant">CE</span> – <span
+                class="proj text-button" id="equirectangular" data-i18n-title="proj.equirectangular">E</span> – <span
+                class="proj text-button" id="orthographic" data-i18n-title="proj.orthographic">O</span> – <span
+                class="proj text-button" id="stereographic" data-i18n-title="proj.stereographic">S</span> – <span
+                class="proj text-button" id="waterman" data-i18n-title="proj.waterman">WB</span> – <span
+                class="proj text-button" id="winkel3" data-i18n-title="proj.winkel3">W3</span> – <span
+                class="proj text-button" id="globe3d" data-i18n-title="proj.globe3d">3D</span>
             </p>
-            <!--<p>免責事項 | 正確な情報を提供するためのものではありません</p>-->
-            <p id="lang"><a href="/jp" class="internal-link">日本語</a></p>
+            <p id="lang"><span data-i18n="label.language">Langue</span> | <span
+                class="text-button" data-lang-choice="fr">Français</span> – <span
+                class="text-button" data-lang-choice="en">English</span> – <a href="/jp" class="internal-link">日本語</a>
+            </p>
             <p>
-                <a href="about.html" class="internal-link">about</a>
+                <a href="about.html" class="internal-link" data-i18n="link.about">à propos</a>
             </p>
         </div>
     </div>

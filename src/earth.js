@@ -13,6 +13,9 @@ import { Emitter } from "./events.js";
 import { globes } from "./globes.js";
 import * as products from "./products.js";
 import { createAnimator } from "./particles.js";
+import { initI18n, t, locale } from "./i18n.js";
+
+initI18n();  // before anything reads <body data-lang>
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -44,8 +47,8 @@ const report = function() {
         error(err) {
             let msg = err && err.status ? err.status + " " + err.message : err;
             switch (err && err.status) {
-                case -1: msg = "Server Down"; break;
-                case 404: msg = "No Data"; break;
+                case -1: msg = t("status.serverDown"); break;
+                case 404: msg = t("status.noData"); break;
             }
             log.error(err);
             return s.classed("bad", true).text(msg);
@@ -169,7 +172,7 @@ function buildInputController() {
     display.call(zoom);
     d3.select("#show-location").on("click", function() {
         if (navigator.geolocation) {
-            report.status("Finding current position...");
+            report.status(t("status.locating"));
             navigator.geolocation.getCurrentPosition(function(pos) {
                 report.status("");
                 const coord = [pos.coords.longitude, pos.coords.latitude], rotate = globe.locate(coord);
@@ -213,7 +216,7 @@ function buildInputController() {
  */
 async function buildMesh(resource) {
     const cancel = this.cancel;
-    report.status("Downloading...");
+    report.status(t("status.downloading"));
     const topo = await µ.loadJson(resource);
     if (cancel.requested) return null;
     log.time("building meshes");
@@ -242,7 +245,7 @@ function buildGlobe(projectionName) {
 let downloadsInProgress = 0;
 
 async function buildGrids() {
-    report.status("Downloading...");
+    report.status(t("status.downloading"));
     log.time("build grids");
     // UNDONE: upon failure to load a product, the unloaded product should still be stored in the agent.
     //         this allows us to use the product for navigation and other state.
@@ -278,7 +281,7 @@ let previousRendererDispatch = null;
 function buildRenderer(mesh, globe) {
     if (!mesh || !globe) return null;
 
-    report.status("Rendering Globe...");
+    report.status(t("status.rendering"));
     log.time("rendering map");
 
     const dispatch = new Emitter();
@@ -553,8 +556,8 @@ function validityDate(grids) {
 function showDate(grids) {
     const date = new Date(validityDate(grids)), isLocal = d3.select("#data-date").classed("local");
     const formatted = isLocal ? µ.toLocalISO(date) : µ.toUTCISO(date);
-    d3.select("#data-date").text(formatted + " " + (isLocal ? "Local" : "UTC"));
-    d3.select("#toggle-zone").text("⇄ " + (isLocal ? "UTC" : "Local"));
+    d3.select("#data-date").text(formatted + " " + (isLocal ? t("date.local") : t("date.utc")));
+    d3.select("#toggle-zone").text("⇄ " + (isLocal ? t("date.utc") : t("date.local")));
 }
 
 /**
@@ -638,7 +641,7 @@ function showLocationDetails(point, coord) {
     if (view3d) view3d.setMarker(coord);
 
     if (Number.isFinite(λ) && Number.isFinite(φ)) {
-        d3.select("#location-coord").text(µ.formatCoordinates(λ, φ));
+        d3.select("#location-coord").text(µ.formatCoordinates(λ, φ, t("coord.west")));
         d3.select("#location-close").classed("invisible", false);
     }
 
@@ -712,7 +715,7 @@ function changedKeys() {
  * Registers all event handlers to bind components and page elements together.
  */
 function init() {
-    report.status("Initializing...");
+    report.status(t("status.initializing"));
 
     d3.selectAll(".fill-screen").attr("width", view.width).attr("height", view.height);
     // Adjust size of the scale canvas to fill the width of the menu to the right of the label.
@@ -821,7 +824,7 @@ function init() {
             return;
         }
         if (!view3d) {
-            report.status("Loading 3D...");
+            report.status(t("status.loading3d"));
             loading3d ??= import("./globe3d.js");
             const {createGlobe3D} = await loading3d;
             if (view3d) return sync3d();  // created by a concurrent call
@@ -1007,7 +1010,7 @@ function buildTimeline() {
     const PLAY_DELAY = 700;  // ms to show each step while playing
     let times = [], playing = false, timer = null;
 
-    const format = date => date.toLocaleString(undefined, {weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+    const format = date => date.toLocaleString(locale(), {weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
 
     function nearestIndex(time) {
         let best = 0;

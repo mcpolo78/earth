@@ -126,6 +126,10 @@ function describeSurface(attr) {
     return attr.surface === "surface" ? "Surface" : µ.capitalize(attr.level);
 }
 
+function describeSurfaceFr(attr) {
+    return attr.surface === "surface" ? "Surface" : µ.capitalize(attr.level);
+}
+
 function describeSurfaceJa(attr) {
     return attr.surface === "surface" ? "地上" : µ.capitalize(attr.level);
 }
@@ -183,8 +187,8 @@ const FACTORIES = {
                 field: "vector",
                 type: "wind",
                 description: localize({
-                    name: {en: "Wind", ja: "風速"},
-                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
+                    name: {en: "Wind", ja: "風速", fr: "Vent"},
+                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr), fr: " @ " + describeSurfaceFr(attr)}
                 }),
                 paths: [gfs1p0degPath(attr, "wind", attr.surface, attr.level)],
                 date: gfsDate(attr),
@@ -218,8 +222,8 @@ const FACTORIES = {
                 field: "scalar",
                 type: "temp",
                 description: localize({
-                    name: {en: "Temp", ja: "気温"},
-                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
+                    name: {en: "Temp", ja: "気温", fr: "Température"},
+                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr), fr: " @ " + describeSurfaceFr(attr)}
                 }),
                 paths: [gfs1p0degPath(attr, "temp", attr.surface, attr.level)],
                 date: gfsDate(attr),
@@ -256,8 +260,8 @@ const FACTORIES = {
                 field: "scalar",
                 type: "relative_humidity",
                 description: localize({
-                    name: {en: "Relative Humidity", ja: "相対湿度"},
-                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
+                    name: {en: "Relative Humidity", ja: "相対湿度", fr: "Humidité relative"},
+                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr), fr: " @ " + describeSurfaceFr(attr)}
                 }),
                 paths: [gfs1p0degPath(attr, "relative_humidity", attr.surface, attr.level)],
                 date: gfsDate(attr),
@@ -280,8 +284,8 @@ const FACTORIES = {
                 field: "scalar",
                 type: "air_density",
                 description: localize({
-                    name: {en: "Air Density", ja: "空気密度"},
-                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
+                    name: {en: "Air Density", ja: "空気密度", fr: "Densité de l'air"},
+                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr), fr: " @ " + describeSurfaceFr(attr)}
                 }),
                 paths: [gfs1p0degPath(attr, "air_density", attr.surface, attr.level)],
                 date: gfsDate(attr),
@@ -306,8 +310,8 @@ const FACTORIES = {
                 field: "scalar",
                 type: "wind_power_density",
                 description: localize({
-                    name: {en: "Wind Power Density", ja: "風力エネルギー密度"},
-                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr)}
+                    name: {en: "Wind Power Density", ja: "風力エネルギー密度", fr: "Densité de puissance éolienne"},
+                    qualifier: {en: " @ " + describeSurface(attr), ja: " @ " + describeSurfaceJa(attr), fr: " @ " + describeSurfaceFr(attr)}
                 }),
                 paths: [windProduct.paths[0], airdensProduct.paths[0]],
                 date: gfsDate(attr),
@@ -355,7 +359,7 @@ const FACTORIES = {
                 field: "scalar",
                 type: "total_cloud_water",
                 description: localize({
-                    name: {en: "Total Cloud Water", ja: "雲水量"},
+                    name: {en: "Total Cloud Water", ja: "雲水量", fr: "Eau nuageuse totale"},
                     qualifier: ""
                 }),
                 paths: [gfs1p0degPath(attr, "total_cloud_water")],
@@ -383,7 +387,7 @@ const FACTORIES = {
                 field: "scalar",
                 type: "total_precipitable_water",
                 description: localize({
-                    name: {en: "Total Precipitable Water", ja: "可降水量"},
+                    name: {en: "Total Precipitable Water", ja: "可降水量", fr: "Eau précipitable totale"},
                     qualifier: ""
                 }),
                 paths: [gfs1p0degPath(attr, "total_precipitable_water")],
@@ -415,7 +419,7 @@ const FACTORIES = {
                 field: "scalar",
                 type: "mean_sea_level_pressure",
                 description: localize({
-                    name: {en: "Mean Sea Level Pressure", ja: "海面更正気圧"},
+                    name: {en: "Mean Sea Level Pressure", ja: "海面更正気圧", fr: "Pression au niveau de la mer"},
                     qualifier: ""
                 }),
                 paths: [gfs1p0degPath(attr, "mean_sea_level_pressure")],
@@ -575,7 +579,7 @@ const FACTORIES = {
     "pm10": aerosolFactory("pm10",
         {en: "PM10", ja: "PM10", fr: "PM10"}, PM_UNITS, aqiScale([0, 20, 50, 100, 150, 250, 400])),
     "aerosol_optical_depth": aerosolFactory("aerosol_optical_depth",
-        {en: "Aerosol Optical Depth (550 nm)", ja: "エアロゾル光学的厚さ", fr: "Épaisseur optique des aérosols"},
+        {en: "Aerosol Optical Depth (550 nm)", ja: "エアロゾル光学的厚さ", fr: "Épaisseur optique des aérosols (550 nm)"},
         [{label: "", conversion: x => x, precision: 2}],
         {
             bounds: [0, 2],
@@ -585,7 +589,7 @@ const FACTORIES = {
             ])
         }),
     "dust_optical_depth": aerosolFactory("dust_optical_depth",
-        {en: "Dust Optical Depth (550 nm)", ja: "黄砂・砂塵の光学的厚さ", fr: "Épaisseur optique des poussières"},
+        {en: "Dust Optical Depth (550 nm)", ja: "黄砂・砂塵の光学的厚さ", fr: "Épaisseur optique des poussières (550 nm)"},
         [{label: "", conversion: x => x, precision: 2}],
         {
             bounds: [0, 1.5],
@@ -603,8 +607,8 @@ const FACTORIES = {
                 field: "vector",
                 type: "currents",
                 description: localize({
-                    name: {en: "Ocean Currents", ja: "海流"},
-                    qualifier: {en: " @ Surface", ja: " @ 地上"}
+                    name: {en: "Ocean Currents", ja: "海流", fr: "Courants océaniques"},
+                    qualifier: {en: " @ Surface", ja: " @ 地上", fr: " @ Surface"}
                 }),
                 paths: [oscar0p33Path(catalog, attr)],
                 date: oscarDate(catalog, attr),
