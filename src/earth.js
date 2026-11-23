@@ -924,6 +924,19 @@ function initInterface() {
     });
     configuration.on("change:overlayType", () => drawLegend((gridAgent.value() || {}).overlayGrid));
 
+    // Forecast timeline: hidden unless the user turns it on (remembered in this browser).
+    let showTimeline = false;
+    try { showTimeline = localStorage.getItem("earth.timeline") === "on"; } catch { /* storage blocked */ }
+    function setTimeline(show) {
+        showTimeline = show;
+        if (!show) d3.select("#time-play.highlighted").dispatch("click");  // stop playing
+        body.classed("no-timeline", !show);
+        d3.select("#option-timeline").classed("highlighted", show);
+        try { localStorage.setItem("earth.timeline", show ? "on" : "off"); } catch { /* storage blocked */ }
+    }
+    setTimeline(showTimeline);
+    d3.select("#option-timeline").on("click", () => setTimeline(!showTimeline));
+
     // Time zone.
     function setLocalTime(local) {
         useLocalTime = local;
