@@ -24,7 +24,7 @@ async function setGrid({attr, index, files, version}) {
     } : null;
 }
 
-const masks = new Map();  // cache of rendered globe outlines: key -> alpha mask
+const masks = new Map();  // cache of rendered globe outlines: key -> {canvas}
 
 function maskFor(globe, key, width, height) {
     let mask = masks.get(key);
@@ -33,13 +33,19 @@ function maskFor(globe, key, width, height) {
         const ctx = globe.defineMask(canvas.getContext("2d"));
         ctx.fillStyle = "rgba(255, 0, 0, 1)";
         ctx.fill();
-        mask = ctx.getImageData(0, 0, width, height).data;
+        mask = {canvas};
         if (masks.size > 8) masks.clear();
         masks.set(key, mask);
     }
     return mask;
 }
 
+let output = null;  // full-size canvas the samples are scaled into
+
+/**
+ * Samples the grid once per (step x step) block into a small image, then scales that image up with smoothing
+ * and cuts it to the globe's outline. Coarse steps therefore look soft instead of blocky while the globe moves.
+ */
 function render({id, version, projection: p, width, height, step, alpha}) {
     const view = {width, height};
     const globe = globes.get(p.name)(view);
@@ -47,36 +53,51 @@ function render({id, version, projection: p, width, height, step, alpha}) {
     // outline of the map (which pixels are on the globe); cached so repeated renders of one view are cheap
     const mask = maskFor(globe, [p.name, p.rotate, p.scale, p.translate, width, height].join("|"), width, height);
 
-    const pixels = new Uint8ClampedArray(width * height * 4);
+    const bounds = globe.bounds(view);
+    const cols = Math.max(1, Math.ceil((bounds.xMax - bounds.x + 1) / step));
+    const rows = Math.max(1, Math.ceil((bounds.yMax - bounds.y + 1) / step));
+    const samples = new Uint8ClampedArray(cols * rows * 4);
     if (overlay) {
         const {grid, scale, isVector} = overlay;
         const projection = globe.projection;
-        const bounds = globe.bounds(view);
-        const point = [0, 0];
-        for (let y = bounds.y; y <= bounds.yMax; y += step) {
-            for (let x = bounds.x; x <= bounds.xMax; x += step) {
-                if (mask[(y * width + x) * 4 + 3] === 0) continue;
+        const point = [0, 0], half = step / 2;
+        for (let r = 0, i = 0; r < rows; r++) {
+            const y = bounds.y + r * step + half;
+            for (let c = 0; c < cols; c++, i += 4) {
+                const x = bounds.x + c * step + half;
                 point[0] = x; point[1] = y;
                 const coord = projection.invert(point);
-                if (!coord || !Number.isFinite(coord[0])) continue;
+                if (!coord || !Number.isFinite(coord[0]) || !Number.isFinite(coord[1])) continue;
+                // samples just outside the outline are kept (when the projection can invert them) so the edge
+                // stays sharp once the image is cut to the outline
                 const value = grid.interpolate(coord[0], coord[1]);
                 const scalar = isVector ? value && value[2] : value;
                 if (!µ.isValue(scalar)) continue;
                 const color = scale.gradient(scalar, alpha);
-                const yEnd = Math.min(y + step, height), xEnd = Math.min(x + step, width);
-                for (let yy = y; yy < yEnd; yy++) {
-                    let i = (yy * width + x) * 4;
-                    for (let xx = x; xx < xEnd; xx++, i += 4) {
-                        pixels[i] = color[0];
-                        pixels[i + 1] = color[1];
-                        pixels[i + 2] = color[2];
-                        pixels[i + 3] = color[3];
-                    }
-                }
+                samples[i] = color[0];
+                samples[i + 1] = color[1];
+                samples[i + 2] = color[2];
+                samples[i + 3] = color[3];
             }
         }
     }
-    postMessage({type: "rendered", id, version, width, height, step, buffer: pixels.buffer}, [pixels.buffer]);
+
+    if (!output || output.width !== width || output.height !== height) output = new OffscreenCanvas(width, height);
+    const ctx = output.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+    if (overlay) {
+        const small = new OffscreenCanvas(cols, rows);
+        small.getContext("2d").putImageData(new ImageData(samples, cols, rows), 0, 0);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        // pixel c covers [x + c*step, x + (c+1)*step), so its center lands on the sampled point
+        ctx.drawImage(small, bounds.x, bounds.y, cols * step, rows * step);
+        ctx.globalCompositeOperation = "destination-in";
+        ctx.drawImage(mask.canvas, 0, 0);
+        ctx.globalCompositeOperation = "source-over";
+    }
+    const bitmap = output.transferToImageBitmap();
+    postMessage({type: "rendered", id, version, width, height, step, bitmap}, [bitmap]);
 }
 
 self.onmessage = async ({data}) => {

@@ -13,9 +13,14 @@ import { Emitter } from "./events.js";
 import { globes } from "./globes.js";
 import * as products from "./products.js";
 import { createAnimator } from "./particles.js";
-import { initI18n, t, locale } from "./i18n.js";
+import { initI18n, t, locale, lang } from "./i18n.js";
 
 initI18n();  // before anything reads <body data-lang>
+
+// index.html carries the new interface (side menu, timeline, legend, probe card). The Japanese page (/jp) keeps
+// the original text menu, so the code below supports both, keyed on this flag.
+const NEW_UI = !!document.getElementById("ui");
+const PHONE = window.matchMedia("(max-width: 760px)");
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -25,7 +30,7 @@ const MOVE_END_WAIT = 300;                  // time to wait for a move operation
 
 const OVERLAY_ALPHA = Math.floor(0.4 * 255);  // overlay transparency (on scale [0, 255])
 const OVERLAY_STEP = 2;                     // overlay resolution (pixels per data sample) when the globe is still
-const OVERLAY_STEP_MOVING = 6;              // coarser overlay resolution while the globe is being moved
+const OVERLAY_STEP_MOVING = 4;              // coarser overlay resolution while the globe is being moved (smoothed)
 const PARTICLE_MULTIPLIER = 7;              // particle count scalar (completely arbitrary--this values looks nice)
 const PARTICLE_REDUCTION = 0.75;            // reduce particle count to this much of normal for mobile devices
 
@@ -170,19 +175,34 @@ function buildInputController() {
     }, MOVE_END_WAIT);  // wait for a bit to decide if user has stopped moving the globe
 
     display.call(zoom);
+
+    /** Turns the globe to face [λ, φ] (when the projection can rotate) and shows the details there. */
+    function goTo(coord) {
+        if (!globe) return;
+        const rotate = globe.locate(coord);
+        if (rotate) {
+            globe.projection.rotate(rotate);
+            configuration.save({orientation: globe.orientation()});  // triggers reorientation
+        }
+        if (globe.is3D && view3d) view3d.lookAt(coord);
+        dispatch.trigger("click", globe.projection(coord), coord);
+    }
+
+    /** Multiplies the current zoom by the factor, within the globe's limits. */
+    function zoomBy(factor) {
+        if (!globe || globe.is3D) return;
+        const [lo, hi] = globe.scaleExtent();
+        globe.projection.scale(µ.clamp(globe.projection.scale() * factor, lo, hi));
+        configuration.save({orientation: globe.orientation()});
+    }
+
     d3.select("#show-location").on("click", function() {
         if (navigator.geolocation) {
             report.status(t("status.locating"));
             navigator.geolocation.getCurrentPosition(function(pos) {
                 report.status("");
-                const coord = [pos.coords.longitude, pos.coords.latitude], rotate = globe.locate(coord);
-                if (rotate) {
-                    globe.projection.rotate(rotate);
-                    configuration.save({orientation: globe.orientation()});  // triggers reorientation
-                }
-                if (globe.is3D && view3d) view3d.lookAt(coord);
-                dispatch.trigger("click", globe.projection(coord), coord);
-            }, log.error);
+                goTo([pos.coords.longitude, pos.coords.latitude]);
+            }, err => report.error(err.message || err));
         }
     });
 
@@ -199,6 +219,8 @@ function buildInputController() {
     }
 
     const dispatch = new Emitter();
+    dispatch.goTo = goTo;
+    dispatch.zoomBy = zoomBy;
     dispatch.globe = function(_) {
         if (_) {
             globe = _;
@@ -299,7 +321,7 @@ function buildRenderer(mesh, globe) {
     const path = d3.geoPath().projection(globe.projection).pointRadius(7);
     const coastline = d3.select(".coastline");
     const lakes = d3.select(".lakes");
-    d3.selectAll("path").attr("d", path);  // do an initial draw -- fixes issue with safari
+    d3.selectAll("#map path, #foreground path").attr("d", path);  // do an initial draw -- fixes issue with safari
 
     function drawLocationMark(point, coord) {
         // show the location on the map if defined
@@ -323,7 +345,7 @@ function buildRenderer(mesh, globe) {
     // Throttled draw method helps with slow devices that would get overwhelmed by too many redraw events.
     const REDRAW_WAIT = 5;  // milliseconds
     const doDraw_throttled = µ.throttle(function() {
-        d3.selectAll("path").attr("d", path);
+        d3.selectAll("#map path, #foreground path").attr("d", path);
         rendererAgent.trigger("redraw");
     }, REDRAW_WAIT);
 
@@ -341,7 +363,7 @@ function buildRenderer(mesh, globe) {
             moveEnd() {
                 coastline.datum(mesh.coastHi);
                 lakes.datum(mesh.lakesHi);
-                d3.selectAll("path").attr("d", path);
+                d3.selectAll("#map path, #foreground path").attr("d", path);
                 rendererAgent.trigger("render");
             },
             click: drawLocationMark
@@ -422,9 +444,11 @@ function buildOverlayRenderer() {
     }
 
     function draw(data) {
-        if (data.width !== canvas.width || data.height !== canvas.height) return;  // view resized meanwhile
+        if (data.width !== canvas.width || data.height !== canvas.height) return data.bitmap.close();  // resized
         const ctx = canvas.getContext("2d");
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(data.buffer), data.width, data.height), 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(data.bitmap, 0, 0);
+        data.bitmap.close();
         drawGridPoints(ctx, (gridAgent.value() || {}).overlayGrid, globeAgent.value());
     }
 
@@ -439,6 +463,7 @@ function buildOverlayRenderer() {
             case "rendered":
                 inFlight = false;
                 if (data.version === version && enabled) draw(data);
+                else data.bitmap.close();
                 flush();
                 break;
             case "error":
@@ -512,9 +537,43 @@ function drawGridPoints(ctx, grid, globe) {
     });
 }
 
+// Units chosen by the user for each kind of layer (new interface): {gridType: index into grid.units}.
+const unitChoice = {};
+
+function unitsOf(grid) {
+    return grid.units[(unitChoice[grid.type] || 0) % grid.units.length];
+}
+
+function cycleUnits(grid) {
+    unitChoice[grid.type] = ((unitChoice[grid.type] || 0) + 1) % grid.units.length;
+    const grids = gridAgent.value();
+    if (grids) drawScaleBar(grids.overlayGrid);
+    updateLocationDetails();
+}
+
+/** New interface: the legend panel (name, units, color bar and five graduations). */
+function drawLegend(grid) {
+    const legend = d3.select("#legend");
+    const visible = !!grid && configuration.get("overlayType") !== "off";
+    legend.classed("invisible", !visible);
+    if (!visible) return;
+    const units = unitsOf(grid), bounds = grid.scale.bounds;
+    d3.select("#legend-name").text(grid.description(lang()).name);
+    d3.select("#legend-units").text(units.label).classed("invisible", !units.label || grid.units.length < 2)
+        .on("click", () => cycleUnits(grid));
+    // Round graduations in the displayed units, placed where they fall on the bar.
+    const lo = units.conversion(bounds[0]), hi = units.conversion(bounds[1]);
+    const scale = d3.scaleLinear().domain([lo, hi]);
+    const ticks = scale.ticks(5).map(v => ({v, x: Math.abs(scale(v))}));
+    d3.select("#scale-labels").selectAll("span").data(ticks).join("span")
+        .style("left", d => (d.x * 100) + "%")
+        .text(d => d.v.toLocaleString(locale(), {maximumFractionDigits: 2}).replace("-", "−"));
+}
+
 /** Draws the color bar for the overlay grid in the menu, with a tooltip showing the value under the mouse. */
 function drawScaleBar(grid) {
     µ.clearCanvas(d3.select("#scale").node());
+    if (NEW_UI) drawLegend(grid);
     if (!grid) return;
     const colorBar = d3.select("#scale"), scale = grid.scale, bounds = scale.bounds;
     const c = colorBar.node(), g = c.getContext("2d"), n = c.width - 1;
@@ -530,7 +589,7 @@ function drawScaleBar(grid) {
         const pct = µ.clamp((Math.round(x) - 2) / (n - 2), 0, 1);
         const value = µ.spread(pct, bounds[0], bounds[1]);
         const elementId = grid.type === "wind" ? "#location-wind-units" : "#location-value-units";
-        const units = createUnitToggle(elementId, grid).value();
+        const units = NEW_UI ? unitsOf(grid) : createUnitToggle(elementId, grid).value();
         colorBar.attr("title", µ.formatScalar(value, units) + " " + units.label);
     });
 }
@@ -550,10 +609,29 @@ function validityDate(grids) {
         parts[0] === "current" ? now : null;
 }
 
+// New interface: show times in local time or UTC (remembered in this browser).
+let useLocalTime = true;
+try { useLocalTime = localStorage.getItem("earth.tz") !== "utc"; } catch { /* storage blocked */ }
+
+/** Formats a forecast time for the interface, e.g. "lun. 23 nov. 12:00". */
+function formatTime(date, withMonth = true) {
+    const options = {weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit"};
+    if (withMonth) options.month = "short";
+    if (!useLocalTime) options.timeZone = "UTC";
+    return date.toLocaleString(locale(), options) + (useLocalTime ? "" : " UTC");
+}
+
 /**
  * Display the grid's validity date in the menu. Allow toggling between local and UTC time.
  */
 function showDate(grids) {
+    if (NEW_UI) {
+        const time = validityDate(grids);
+        d3.select("#data-date").text(time === null ? "" : formatTime(new Date(time)));
+        d3.select("#tz-local").classed("highlighted", useLocalTime);
+        d3.select("#tz-utc").classed("highlighted", !useLocalTime);
+        return;
+    }
     const date = new Date(validityDate(grids)), isLocal = d3.select("#data-date").classed("local");
     const formatted = isLocal ? µ.toLocalISO(date) : µ.toUTCISO(date);
     d3.select("#data-date").text(formatted + " " + (isLocal ? t("date.local") : t("date.utc")));
@@ -635,6 +713,7 @@ function showLocationDetails(point, coord) {
     if (globe && globe.is3D ? !Number.isFinite(λ) || !Number.isFinite(φ) : !isOnGlobe(globe, point, coord)) {
         return;
     }
+    if (NEW_UI) return showProbe(point, coord);
 
     clearLocationDetails(false);  // clean the slate
     activeLocation = {point, coord};  // remember where the current location is
@@ -667,7 +746,78 @@ function updateLocationDetails() {
     }
 }
 
+const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+let places = null;  // src/places.js, loaded on first use
+
+function loadPlaces() {
+    places ??= import("./places.js");
+    return places;
+}
+
+/** New interface: fills and places the probe card for the location. */
+function showProbe(point, coord) {
+    const grids = gridAgent.value(), [λ, φ] = coord, globe = globeAgent.value();
+    const isNewSpot = !activeLocation.coord || activeLocation.coord[0] !== λ || activeLocation.coord[1] !== φ;
+    activeLocation = {point, coord};
+    if (view3d) view3d.setMarker(coord);
+
+    const card = d3.select("#location").classed("invisible", false).classed("moving", false);
+    d3.select("#location-coord").text(µ.formatCoordinates(λ, φ, t("coord.west")).replace(/\./g, lang() === "fr" ? "," : "."));
+    let big = "", bigUnits = null, sub = "", subUnits = null, angle = null;
+    if (grids) {
+        const primary = grids.primaryGrid, overlayGrid = grids.overlayGrid;
+        const vector = primary.field === "vector" ? primary.interpolate(λ, φ) : null;
+        if (µ.isValue(vector)) {
+            const toward = Math.atan2(vector[0], vector[1]) * 180 / Math.PI;  // direction the flow goes to
+            angle = (toward + 360) % 360;
+            const from = COMPASS[Math.round(((angle + 180) % 360) / 22.5) % 16];
+            sub = t("wind.from").replace("{dir}", t("dir." + from));
+            const units = unitsOf(primary), speed = µ.formatScalar(vector[2], units);
+            if (overlayGrid === primary || configuration.get("overlayType") === "off") {
+                big = speed; bigUnits = primary;
+            }
+            else {
+                sub = speed + " " + units.label + " " + sub;
+            }
+        }
+        if (overlayGrid !== primary && configuration.get("overlayType") !== "off") {
+            const value = overlayGrid.interpolate(λ, φ);
+            if (µ.isValue(value)) {
+                big = µ.formatScalar(value, unitsOf(overlayGrid));
+                bigUnits = overlayGrid;
+            }
+        }
+    }
+    d3.select("#location-value").text(big.replace(/(\d)\.(\d)/, lang() === "fr" ? "$1,$2" : "$1.$2"));
+    d3.select("#location-value-units").text(bigUnits ? unitsOf(bigUnits).label : "")
+        .on("click", () => bigUnits && cycleUnits(bigUnits));
+    d3.select("#location-wind").text(sub);
+    d3.select("#location-wind-units").text("");
+    d3.select("#location-arrow").classed("invisible", angle === null).style("transform", `rotate(${angle}deg)`);
+
+    // Place the card next to the point, inside the window (on phones, CSS docks it at the top).
+    const node = card.node(), screen = globe && !globe.is3D ? projectVisible(globe, coord) : null;
+    if (screen && !PHONE.matches) {
+        const w = node.offsetWidth, h = node.offsetHeight;
+        let x = screen[0] + 18, y = screen[1] - h / 2;
+        if (x + w > view.width - 70) x = screen[0] - 18 - w;
+        y = µ.clamp(y, 70, view.height - h - 100);
+        card.style("left", x + "px").style("top", y + "px").style("right", null);
+    }
+    else if (!PHONE.matches) {
+        card.style("left", null).style("right", "70px").style("top", "80px");
+    }
+
+    if (isNewSpot) {
+        d3.select("#location-country").text("");
+        loadPlaces().then(m => m.countryAt(coord, lang())).then(name => {
+            if (activeLocation.coord === coord) d3.select("#location-country").text(name || "");
+        }).catch(log.error);
+    }
+}
+
 function clearLocationDetails(clearEverything) {
+    if (NEW_UI && clearEverything) d3.select("#location").classed("invisible", true);
     d3.select("#location-coord").text("");
     d3.select("#location-close").classed("invisible", true);
     d3.select("#location-wind").text("");
@@ -712,21 +862,170 @@ function changedKeys() {
 }
 
 /**
+ * New interface (index.html): side menu with tabs, layer tiles, tools, search, legend and time zone.
+ */
+function initInterface() {
+    const menu = d3.select("#menu"), body = d3.select(document.body);
+
+    // Menu: a side panel on desktop (open by default), a bottom sheet on phones (closed by default).
+    function setMenuOpen(open) {
+        menu.classed("closed", !open);
+        body.classed("menu-closed", !open).classed("sheet-open", open && PHONE.matches);
+    }
+    setMenuOpen(!PHONE.matches);
+    PHONE.addEventListener("change", e => setMenuOpen(!e.matches));
+    d3.select("#show-menu").on("click", () => setMenuOpen(menu.classed("closed")));
+
+    d3.selectAll("[data-tab]").on("click", function() {
+        const tab = this.dataset.tab, wasSelected = this.getAttribute("aria-selected") === "true";
+        if (PHONE.matches && wasSelected && !menu.classed("closed")) return setMenuOpen(false);
+        d3.selectAll("[data-tab]").attr("aria-selected", function() { return String(this.dataset.tab === tab); });
+        d3.selectAll("[data-panel]").property("hidden", function() { return this.dataset.panel !== tab; });
+        setMenuOpen(true);
+    });
+
+    // Layer tiles. Each tile names the configuration it shows; switching between the atmosphere and the ocean
+    // also resets the height and, for the 2014 currents sample, the date.
+    function selectLayer(layer) {
+        const attr = configuration.attributes;
+        if (layer.param === "wind") {
+            const next = {param: "wind", overlayType: layer.overlayType};
+            if (attr.param !== "wind") Object.assign(next, {surface: "surface", level: "level"});
+            if (attr.level === "currents") Object.assign(next, {date: "current", hour: ""});
+            return configuration.save(next);
+        }
+        if (layer.level === "waves") {
+            const next = {...layer};
+            if (attr.level === "currents") Object.assign(next, {date: "current", hour: ""});
+            return configuration.save(next);
+        }
+        // The currents sample has its own dates: use the closest one available.
+        Promise.all(products.productsFor({...attr, ...layer, date: "current"})).then(([product]) => {
+            configuration.save(product && product.date ? {...layer, ...µ.dateToConfig(product.date)} : layer);
+        }).catch(report.error);
+        stopAnimation(true);
+    }
+    const tiles = d3.selectAll(".tile[data-layer]").each(function() {
+        this.layer = JSON.parse(this.dataset.layer);
+    });
+    tiles.on("click", function() {
+        if (!this.classList.contains("disabled")) selectLayer(this.layer);
+    });
+    configuration.on("change", function(model) {
+        const attr = model.attributes;
+        tiles.classed("highlighted", function() {
+            return Object.entries(this.layer).every(([k, v]) => attr[k] === v);
+        });
+        d3.select("#option-overlay").classed("highlighted", attr.overlayType !== "off");
+        d3.select("#nav-now").classed("highlighted", attr.date === "current");
+    });
+    d3.select("#option-overlay").on("click", function() {
+        configuration.save({overlayType: configuration.get("overlayType") === "off" ? "default" : "off"});
+    });
+    configuration.on("change:overlayType", () => drawLegend((gridAgent.value() || {}).overlayGrid));
+
+    // Time zone.
+    function setLocalTime(local) {
+        useLocalTime = local;
+        try { localStorage.setItem("earth.tz", local ? "local" : "utc"); } catch { /* storage blocked */ }
+        showDate(gridAgent.value());
+        timelineRedraw();
+    }
+    d3.select("#tz-local").on("click", () => setLocalTime(true));
+    d3.select("#tz-utc").on("click", () => setLocalTime(false));
+
+    // Tools.
+    d3.select("#zoom-in").on("click", () => inputController.zoomBy(1.4));
+    d3.select("#zoom-out").on("click", () => inputController.zoomBy(1 / 1.4));
+    d3.select("#share-view").on("click", function() {
+        navigator.clipboard.writeText(window.location.href)
+            .then(() => {
+                report.status(t("status.linkCopied"));
+                setTimeout(() => d3.select("#status").text() === t("status.linkCopied") && report.status(""), 2000);
+            })
+            .catch(() => window.prompt("", window.location.href));
+    });
+    d3.select("#fullscreen").on("click", function() {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen?.().catch(log.error);
+    });
+    document.addEventListener("fullscreenchange", () => {
+        d3.select("#fullscreen").classed("highlighted", !!document.fullscreenElement);
+    });
+
+    // Place search (sent on Enter only, see src/places.js).
+    const form = d3.select("#search"), input = d3.select("#search-input"), list = d3.select("#search-results");
+    d3.select("#search-toggle").on("click", function() {
+        const open = !form.classed("open");
+        form.classed("open", open);
+        if (open) input.node().focus();
+    });
+    function closeResults() {
+        list.classed("invisible", true).selectAll("li").remove();
+    }
+    function choose(place) {
+        closeResults();
+        form.classed("open", false);
+        input.property("value", place.name);
+        input.node().blur();
+        inputController.goTo(place.coord);
+    }
+    form.on("submit", function(event) {
+        event.preventDefault();
+        const text = input.property("value");
+        if (!text.trim()) return closeResults();
+        loadPlaces().then(m => m.searchPlaces(text, lang())).then(results => {
+            list.classed("invisible", false).selectAll("li").remove();
+            if (results.length === 0) {
+                list.append("li").attr("class", "empty").text(t("search.none"));
+                return;
+            }
+            if (results.length === 1) return choose(results[0]);
+            results.forEach(place => {
+                const li = list.append("li").on("click", () => choose(place));
+                li.append("span").text(place.name);
+                li.append("small").text(place.detail);
+            });
+        }).catch(err => {
+            log.error(err);
+            list.classed("invisible", false).selectAll("li").remove();
+            list.append("li").attr("class", "empty").text(t("search.error"));
+        });
+    });
+    input.on("keydown", event => event.key === "Escape" && (closeResults(), form.classed("open", false)));
+    d3.select(document).on("click.search", event => {
+        if (!form.node().contains(event.target) && event.target.closest("#search-toggle") === null) closeResults();
+    });
+
+    // On phones, touching the map folds the sheet away.
+    inputController.on("click", () => PHONE.matches && setMenuOpen(false));
+
+    // The probe card follows its point: faded while the globe moves, placed again once it is redrawn.
+    inputController.on("moveStart", () => d3.select("#location").classed("moving", true));
+    rendererAgent.on("render", updateLocationDetails);
+}
+
+/**
  * Registers all event handlers to bind components and page elements together.
  */
 function init() {
     report.status(t("status.initializing"));
 
     d3.selectAll(".fill-screen").attr("width", view.width).attr("height", view.height);
-    // Adjust size of the scale canvas to fill the width of the menu to the right of the label.
-    const label = d3.select("#scale-label").node();
-    d3.select("#scale")
-        .attr("width", (d3.select("#menu").node().offsetWidth - label.offsetWidth) * 0.97)
-        .attr("height", label.offsetHeight / 2);
+    if (NEW_UI) {
+        initInterface();
+    }
+    else {
+        // Adjust size of the scale canvas to fill the width of the menu to the right of the label.
+        const label = d3.select("#scale-label").node();
+        d3.select("#scale")
+            .attr("width", (d3.select("#menu").node().offsetWidth - label.offsetWidth) * 0.97)
+            .attr("height", label.offsetHeight / 2);
 
-    d3.select("#show-menu").on("click", function() {
-        d3.select("#menu").classed("invisible", !d3.select("#menu").classed("invisible"));
-    });
+        d3.select("#show-menu").on("click", function() {
+            d3.select("#menu").classed("invisible", !d3.select("#menu").classed("invisible"));
+        });
+    }
 
     if (µ.isFF()) {
         // Workaround FF performance issue of slow click behavior on map having thick coastlines.
@@ -895,14 +1194,14 @@ function init() {
         switch (mode === "ocean" && level === "waves" ? "wind" : mode) {  // waves follow the 3-hourly GFS steps
             case "wind":
                 d3.select("#nav-backward-more").attr("title", "-1 Day");
-                d3.select("#nav-backward").attr("title", "-3 Hours");
-                d3.select("#nav-forward").attr("title", "+3 Hours");
+                d3.select("#nav-backward").attr("title", NEW_UI ? "−3 h" : "-3 Hours");
+                d3.select("#nav-forward").attr("title", NEW_UI ? "+3 h" : "+3 Hours");
                 d3.select("#nav-forward-more").attr("title", "+1 Day");
                 break;
             case "ocean":
                 d3.select("#nav-backward-more").attr("title", "-1 Month");
-                d3.select("#nav-backward").attr("title", "-5 Days");
-                d3.select("#nav-forward").attr("title", "+5 Days");
+                d3.select("#nav-backward").attr("title", NEW_UI ? "−5 j" : "-5 Days");
+                d3.select("#nav-forward").attr("title", NEW_UI ? "+5 j" : "+5 Days");
                 d3.select("#nav-forward-more").attr("title", "+1 Month");
                 break;
         }
@@ -971,15 +1270,17 @@ function init() {
 
     // Add handlers for ocean animation types.
     // The currents are a 2014 sample, so coming back to the waves also comes back to the latest forecast.
-    bindButtonToConfiguration("#animate-waves",
-        {param: "ocean", surface: "surface", level: "waves", date: "current", hour: ""}, ["param", "surface", "level"]);
-    bindButtonToConfiguration("#animate-currents", {param: "ocean", surface: "surface", level: "currents"});
+    if (!NEW_UI) {
+        bindButtonToConfiguration("#animate-waves",
+            {param: "ocean", surface: "surface", level: "waves", date: "current", hour: ""}, ["param", "surface", "level"]);
+        bindButtonToConfiguration("#animate-currents", {param: "ocean", surface: "surface", level: "currents"});
+    }
 
-    // Add handlers for all overlay buttons.
-    products.overlayTypes.forEach(type => {
+    // Add handlers for all overlay buttons (the new interface binds its layer tiles in initInterface).
+    if (!NEW_UI) products.overlayTypes.forEach(type => {
         bindButtonToConfiguration("#overlay-" + type, {overlayType: type});
     });
-    bindButtonToConfiguration("#overlay-wind", {param: "wind", overlayType: "default"});
+    if (!NEW_UI) bindButtonToConfiguration("#overlay-wind", {param: "wind", overlayType: "default"});
     bindButtonToConfiguration("#overlay-ocean-off", {overlayType: "off"});
     bindButtonToConfiguration("#overlay-waves-off", {overlayType: "off"});
     bindButtonToConfiguration("#overlay-wave_height", {overlayType: "default"});
@@ -1004,13 +1305,37 @@ function init() {
  * it, or pressing play, navigates the configuration to that time. While playing, the next step is requested a
  * moment after the previous one has been displayed.
  */
+let timelineRedraw = () => {};  // set by buildTimeline, used when the time zone changes
+
 function buildTimeline() {
     const row = d3.select("#time-row"), slider = d3.select("#time-slider");
     const label = d3.select("#time-label"), play = d3.select("#time-play");
     const PLAY_DELAY = 700;  // ms to show each step while playing
     let times = [], playing = false, timer = null;
 
-    const format = date => date.toLocaleString(locale(), {weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+    const format = date => NEW_UI ? formatTime(date, false) :
+        date.toLocaleString(locale(), {weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+    const setPlayIcon = isPlaying => {
+        if (!NEW_UI) return play.text(isPlaying ? "❚❚" : "▶");
+        play.attr("title", t(isPlaying ? "time.pause.title" : "time.play.title"))
+            .html(`<svg class="i" aria-hidden="true"><use href="#i-${isPlaying ? "pause" : "play"}"/></svg>`);
+    };
+
+    /** New interface: day names above the slider, at the first step of each day. */
+    function drawDays() {
+        if (!NEW_UI) return;
+        const days = [];
+        const dayOf = d => useLocalTime ? d.toDateString() : d.toISOString().slice(0, 10);
+        times.forEach((time, i) => {
+            if (i === 0 || dayOf(time) !== dayOf(times[i - 1])) days.push({i, time});
+        });
+        const n = Math.max(times.length - 1, 1);
+        const options = {weekday: "short", day: "numeric", ...(useLocalTime ? {} : {timeZone: "UTC"})};
+        d3.select("#time-days").selectAll("span").data(days).join("span")
+            .style("left", d => (d.i / n * 100) + "%")
+            .text(d => d.time.toLocaleDateString(locale(), options));
+    }
+    timelineRedraw = () => { drawDays(); sync(); };
 
     function nearestIndex(time) {
         let best = 0;
@@ -1038,7 +1363,8 @@ function buildTimeline() {
     function stop() {
         playing = false;
         clearTimeout(timer);
-        play.text("▶").classed("highlighted", false);
+        setPlayIcon(false);
+        play.classed("highlighted", false);
     }
 
     function advance() {
@@ -1061,7 +1387,8 @@ function buildTimeline() {
         }
         else if (times.length > 1) {
             playing = true;
-            play.text("❚❚").classed("highlighted", true);
+            setPlayIcon(true);
+            play.classed("highlighted", true);
             advance();
         }
     });
@@ -1085,6 +1412,7 @@ function buildTimeline() {
         times = catalog.times.map(t => new Date(t));
         slider.attr("max", Math.max(times.length - 1, 0));
         row.classed("invisible", times.length < 2 || !usesTimeline());
+        drawDays();
         sync();
     }).catch(() => row.classed("invisible", true));
 }
