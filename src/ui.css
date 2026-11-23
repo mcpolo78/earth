@@ -234,3 +234,12 @@ body.menu-closed #timeline { left: var(--gap); }
 /* layers without forecast steps (the 2014 currents sample): only the ‹ › steps are useful */
 #timeline:has(.track.invisible) #time-play,
 #timeline:has(.track.invisible) #time-label { visibility: hidden; }
+
+/* forecast timeline turned off (Map tab): panels reach down to the bottom edge */
+body.no-timeline #timeline { display: none; }
+body.no-timeline .side { bottom: var(--gap); }
+body.no-timeline .legend { bottom: var(--gap); }
+@media (max-width: 760px) {
+    body.no-timeline .side { bottom: 0; }
+    body.no-timeline .legend { bottom: auto; }
+}
