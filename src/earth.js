@@ -30,7 +30,7 @@ const MOVE_END_WAIT = 300;                  // time to wait for a move operation
 
 const OVERLAY_ALPHA = Math.floor(0.4 * 255);  // overlay transparency (on scale [0, 255])
 const OVERLAY_STEP = 2;                     // overlay resolution (pixels per data sample) when the globe is still
-const OVERLAY_STEP_MOVING = 6;              // coarser overlay resolution while the globe is being moved
+const OVERLAY_STEP_MOVING = 4;              // coarser overlay resolution while the globe is being moved (smoothed)
 const PARTICLE_MULTIPLIER = 7;              // particle count scalar (completely arbitrary--this values looks nice)
 const PARTICLE_REDUCTION = 0.75;            // reduce particle count to this much of normal for mobile devices
 
@@ -444,9 +444,11 @@ function buildOverlayRenderer() {
     }
 
     function draw(data) {
-        if (data.width !== canvas.width || data.height !== canvas.height) return;  // view resized meanwhile
+        if (data.width !== canvas.width || data.height !== canvas.height) return data.bitmap.close();  // resized
         const ctx = canvas.getContext("2d");
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(data.buffer), data.width, data.height), 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(data.bitmap, 0, 0);
+        data.bitmap.close();
         drawGridPoints(ctx, (gridAgent.value() || {}).overlayGrid, globeAgent.value());
     }
 
@@ -461,6 +463,7 @@ function buildOverlayRenderer() {
             case "rendered":
                 inFlight = false;
                 if (data.version === version && enabled) draw(data);
+                else data.bitmap.close();
                 flush();
                 break;
             case "error":
